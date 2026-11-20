@@ -159,7 +159,7 @@ mod tests {
         let a_before = g.total_moles(0) + g.total_moles(2);
         let b_before = g.total_moles(1) + g.total_moles(2);
         for _ in 0..100 {
-            g.react(&[r.clone()], 0.01);
+            g.react(std::slice::from_ref(&r), 0.01);
         }
         assert!((g.total_moles(0) + g.total_moles(2) - a_before).abs() < 1e-10);
         assert!((g.total_moles(1) + g.total_moles(2) - b_before).abs() < 1e-10);
