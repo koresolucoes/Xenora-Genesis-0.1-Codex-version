@@ -25,7 +25,9 @@ fn main() -> io::Result<()> {
                 b + c
             )?;
         }
-        if step == 200 { break; }
+        if step == 200 {
+            break;
+        }
         grid.inject_moles([16, 16, 0], 0, 0.01);
         grid.inject_moles([16, 16, 0], 1, 0.01);
         grid.diffuse(&[0.1, 0.1, 0.05], 0.25);
