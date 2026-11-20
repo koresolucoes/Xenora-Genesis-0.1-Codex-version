@@ -39,7 +39,8 @@ impl Grid {
         self.concentrations
             .chunks_exact(self.species)
             .map(|c| c[s])
-            .sum::<f64>() * self.dx.powi(3)
+            .sum::<f64>()
+            * self.dx.powi(3)
     }
 
     /// Explicit 6-neighbor diffusion; no flux across the domain boundary.
@@ -63,12 +64,24 @@ impl Grid {
                     for (s, &d) in diffusion.iter().enumerate() {
                         let i = self.index(x, y, z, s);
                         let mut delta = 0.0;
-                        if x > 0 { delta += old[self.index(x - 1, y, z, s)] - old[i]; }
-                        if x + 1 < nx { delta += old[self.index(x + 1, y, z, s)] - old[i]; }
-                        if y > 0 { delta += old[self.index(x, y - 1, z, s)] - old[i]; }
-                        if y + 1 < ny { delta += old[self.index(x, y + 1, z, s)] - old[i]; }
-                        if z > 0 { delta += old[self.index(x, y, z - 1, s)] - old[i]; }
-                        if z + 1 < nz { delta += old[self.index(x, y, z + 1, s)] - old[i]; }
+                        if x > 0 {
+                            delta += old[self.index(x - 1, y, z, s)] - old[i];
+                        }
+                        if x + 1 < nx {
+                            delta += old[self.index(x + 1, y, z, s)] - old[i];
+                        }
+                        if y > 0 {
+                            delta += old[self.index(x, y - 1, z, s)] - old[i];
+                        }
+                        if y + 1 < ny {
+                            delta += old[self.index(x, y + 1, z, s)] - old[i];
+                        }
+                        if z > 0 {
+                            delta += old[self.index(x, y, z - 1, s)] - old[i];
+                        }
+                        if z + 1 < nz {
+                            delta += old[self.index(x, y, z + 1, s)] - old[i];
+                        }
                         self.concentrations[i] = old[i] + dt * d * delta / self.dx.powi(2);
                     }
                 }
@@ -89,16 +102,23 @@ impl Grid {
         for cell in self.concentrations.chunks_exact_mut(self.species) {
             let mut change = vec![0.0; self.species];
             for r in reactions {
-                let rate = r.orders.iter().enumerate().fold(r.rate_constant, |acc, (i, order)| {
-                    acc * cell[i].powf(*order)
-                });
+                let rate = r
+                    .orders
+                    .iter()
+                    .enumerate()
+                    .fold(r.rate_constant, |acc, (i, order)| {
+                        acc * cell[i].powf(*order)
+                    });
                 for (i, coeff) in r.stoich.iter().enumerate() {
                     change[i] += coeff * rate * dt;
                 }
             }
             for i in 0..self.species {
                 let next = cell[i] + change[i];
-                assert!(next.is_finite() && next >= -1e-12, "reaction step too large or invalid");
+                assert!(
+                    next.is_finite() && next >= -1e-12,
+                    "reaction step too large or invalid"
+                );
                 cell[i] = next.max(0.0);
             }
         }
@@ -120,7 +140,9 @@ mod tests {
     fn diffusion_conserves_moles_and_nonnegative() {
         let mut g = Grid::new([8, 8, 4], 1.0, 1);
         g.inject_moles([4, 4, 2], 0, 10.0);
-        for _ in 0..100 { g.diffuse(&[0.1], 0.5); }
+        for _ in 0..100 {
+            g.diffuse(&[0.1], 0.5);
+        }
         assert!((g.total_moles(0) - 10.0).abs() < 1e-9);
         assert!(g.concentrations.iter().all(|&c| c >= 0.0));
     }
@@ -136,7 +158,9 @@ mod tests {
         };
         let a_before = g.total_moles(0) + g.total_moles(2);
         let b_before = g.total_moles(1) + g.total_moles(2);
-        for _ in 0..100 { g.react(&[r.clone()], 0.01); }
+        for _ in 0..100 {
+            g.react(&[r.clone()], 0.01);
+        }
         assert!((g.total_moles(0) + g.total_moles(2) - a_before).abs() < 1e-10);
         assert!((g.total_moles(1) + g.total_moles(2) - b_before).abs() < 1e-10);
     }
