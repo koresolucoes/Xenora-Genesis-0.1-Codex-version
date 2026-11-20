@@ -3,6 +3,8 @@ import test from "node:test";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import app from "../worker.js";
 import { World } from "../public/src/engine.js";
+import { EvolvingWorld } from "../public/src/evolving-world.js";
+import { evolutionarySurfaceSample } from "../public/src/evolving-environment.js";
 import { PrimordialWorld } from "../public/src/primordial.js";
 
 const env = {
@@ -197,4 +199,46 @@ test("a culture references its source silicate lot without adding the disk's sto
       assert.deepEqual(data.minerals,[]);
     }
   }
+});
+
+test("an evolving-world checkpoint archives the habitat, behavior and heritable thermal trait", async t => {
+  const world = new EvolvingWorld(42);
+  for (let i=0; i<12; i++) world.step();
+  const snapshot = world.serialize();
+  let archived;
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    archived = JSON.parse(options.body).p_body;
+    return Response.json({revision:1});
+  });
+  const body = {worldId:randomUUID(),runId:randomUUID(),mode:"evolving-world",checkpoint:snapshot};
+  const save = data => app.fetch(request("", {method:"POST", token:"b".repeat(64), operation:randomUUID(), body:data}),env);
+  assert.equal((await save(body)).status,201);
+  assert.deepEqual(EvolvingWorld.restore(archived.checkpoint).serialize(), snapshot);
+  assert.equal(archived.run.engineVersion,"evolving-world-v1");
+  const last = archived.samples.at(-1).data;
+  const expected = world.getMetrics();
+  for (const key of ["population","meanTrait","meanTemperatureK","waterError","energyError",
+      "behaviorDecisions","exploreDecisions","behaviorRewardTotal","learnedUpdates"]) {
+    assert(Number.isFinite(expected[key]), key);
+    assert.equal(last[key],expected[key],key);
+  }
+  assert.deepEqual(last.traitCounts,expected.traitCounts);
+  assert.deepEqual(last.traitFrequencies,expected.traitFrequencies);
+  assert.equal(last.learningEnabled,world.controls.learningEnabled);
+  assert.equal(archived.genealogy.filter(row=>row.observedIn==="living").length,world.organisms.length);
+  const founder = world.organisms[0];
+  assert(founder);
+  const gene = archived.genealogy.find(row=>row.id===founder.id);
+  assert.equal(gene.allele,founder.genome.allele);
+  assert.equal(gene.trait,founder.trait);
+  assert.equal(gene.sequence,undefined);
+  assert.deepEqual(archived.minerals,[]);
+  const primordial = new PrimordialWorld({seed:42});
+  while (!primordial.lagoon) primordial.step();
+  const sampled = EvolvingWorld.fromSurfaceSample(evolutionarySurfaceSample(primordial));
+  assert.equal((await save({...body,checkpoint:sampled.serialize()})).status,201);
+  assert.equal(archived.minerals[0].units,primordial.mineralLot.units);
+  assert.equal(archived.minerals[0].sampleSites,primordial.lagoon.sites.length);
+  assert.equal((await save({...body, mode:"primordial"})).status,422);
+  assert.equal((await save({...body, checkpoint:{...snapshot, tick:-1}})).status,422);
 });

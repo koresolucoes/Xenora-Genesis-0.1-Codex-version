@@ -14,10 +14,12 @@ function store(area,key,value) {
 }
 
 export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
-  if (!root) return {detach(){}, async forkWith(){return false;}};
+  if (!root) return {detach(){}, getRemoteReference(){return null;}, async forkWith(){return false;}};
   const localKey = 'xenora.archive.' + mode;
   const pendingKey = localKey + '.outbox';
-  const files = mode === 'primordial';
+  const primordial = mode === 'primordial';
+  const evolving = mode === 'evolving-world';
+  const files = primordial || evolving;
   root.classList.add('world-archive');
   root.innerHTML = `
     <div class="wa-head"><div><h2>Arquivo de mundos</h2><p>Salve uma revisão ou abra outro ramo para comparar sua evolução.</p></div>
@@ -32,7 +34,7 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
     <button type="button" data-act="fork">Bifurcar esta revisão</button></div>
     <label>Registros desta revisão<select data-view><option value="events">Acontecimentos</option>
     <option value="minerals">Origem dos minerais</option>
-    ${files ? '<option value="quantities">Inventário dos elementos</option>' : '<option value="genealogy">Genealogia observada</option>'}
+    ${primordial ? '<option value="quantities">Inventário dos elementos</option>' : '<option value="genealogy">Genealogia observada</option>'}
     <option value="samples">Medições do mundo</option></select></label>
     <div class="wa-actions"><button type="button" data-act="query">Consultar registros</button><button type="button" data-act="next-rows" hidden>Mais registros</button></div>
     <div data-observations class="wa-rows" aria-live="polite"></div></div>
@@ -108,7 +110,7 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
     }
     const key=newCapability(), runId=crypto.randomUUID();
     return perform(makeOperation('create',key,{mode,worldId:key.worldId,runId,checkpoint:snapshot,
-      label:(mode==='primordial'?'Universo ':'Lagoa ') + (snapshot.seed ?? '')},runId));
+      label:(primordial ? 'Universo ' : evolving ? 'Mundo ' : 'Lagoa ') + (snapshot.seed ?? '')},runId));
   }
   function showOptions(node,items) {
     node.replaceChildren();
@@ -183,13 +185,18 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
   function describe(view,row) {
     if (view==='events') return 'Passo '+row.tick+' · '+(row.data?.text||row.type);
     if (view==='minerals') {
-      const interval=row.inventoryScope==='source-disk' ? 'amostra no passo '+row.sourceTick+' · '+row.sampleSites+' sítios locais' : 'passos '+row.firstTick+'–'+row.lastTick;
+      const interval=row.inventoryScope==='source-disk' ? 'amostra no passo '+row.sourceTick+(Number.isSafeInteger(row.sampleSites)?' · '+row.sampleSites+' sítios locais':'') : 'passos '+row.firstTick+'–'+row.lastTick;
       return (row.formula||'Mineral')+' · '+Number(row.units).toLocaleString('pt-BR',{maximumFractionDigits:4})+' lotes do disco · '+(row.source==='stellar-neighborhood'?'ejeção estelar':row.source)+' · '+interval;
     }
     if (view==='quantities') return row.symbol+' · gás '+row.gas+' · mineral '+row.mineral+' · exportado '+row.exported;
-    if (view==='genealogy') return '#'+row.id+' · geração '+row.generation+' · '+(row.parentId==null?'fundador':'progenitor #'+row.parentId)+' · fita '+row.sequence;
+    if (view==='genealogy') {
+      const gene = evolving ? 'alelo térmico '+row.allele : 'fita '+row.sequence;
+      const origin = {birth:'nascimento',death:'morte',living:'vivo'}[row.observedIn];
+      const evidence = origin && Number.isSafeInteger(row.observedAtTick) ? ' · '+origin+' no passo '+row.observedAtTick : '';
+      return '#'+row.id+' · geração '+row.generation+' · '+(row.parentId==null?'fundador':'progenitor #'+row.parentId)+' · '+gene+evidence;
+    }
     const d=row.data||{};
-    const values=[['population','organismos'],['scaleFactor','fator de escala'],['mineralUnits','un. de mineral'],['bodyMass','biomassa'],['cosmicTemperature','K (radiação)'],['matterDensity','densidade relativa']]
+    const values=[['population','organismos'],['scaleFactor','fator de escala'],['mineralUnits','un. de mineral'],['bodyMass','biomassa'],['cosmicTemperature','temperatura relativa'],['matterDensity','densidade relativa'],['meanTemperatureK','K'],['meanHumidity','umidade relativa'],['meanTrait','traço térmico médio'],['mutations','mutações']]
       .filter(([key])=>Number.isFinite(d[key])).map(([key,label])=>d[key].toLocaleString('pt-BR',{maximumFractionDigits:3})+' '+label);
     return 'Passo '+row.tick+(values.length?' · '+values.join(' · '):' · medição arquivada');
   }
@@ -223,7 +230,7 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
     bind('export',()=>{
       const snapshot=getSnapshot(),link=document.createElement('a');
       const url=URL.createObjectURL(new Blob([JSON.stringify(snapshot)],{type:'application/json'}));
-      link.href=url;link.download='xenora-primordial-'+snapshot.seed+'-'+snapshot.tick+'.json';link.click();
+      link.href=url;link.download='xenora-'+mode+'-'+snapshot.seed+'-'+snapshot.tick+'.json';link.click();
       setTimeout(()=>URL.revokeObjectURL(url),30000);
     });
     action('import').addEventListener('click',()=>q('[data-file]').click());
@@ -244,7 +251,11 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
   timer?.unref?.();
   refresh();
   if (pending) say('Há um envio anterior aguardando confirmação.');
-  return {detach, forkWith(transform,label) {
+  function getRemoteReference() {
+    if (!attached) return null;
+    return {worldId:attached.worldId, runId:attached.runId, revision:attached.revision, tick:archivedTick};
+  }
+  return {detach, getRemoteReference, forkWith(transform,label) {
     return execute(async()=>{
       if (pending) throw new Error('Conclua o envio pendente antes de bifurcar.');
       const base=getSnapshot(), changed=transform(base);

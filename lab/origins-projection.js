@@ -1,11 +1,13 @@
 import { World, validEventIndividual } from "./public/src/engine.js";
+import { EvolvingWorld } from "./public/src/evolving-world.js";
 import { PRIMORDIAL_MODEL, PrimordialWorld } from "./public/src/primordial.js";
 
 // Archive model identities are independent of the saved JSON format.
 // Advance the appropriate identifier when evolution or numerical rules change.
 const MODEL_VERSIONS = Object.freeze({
   "lagoon-molecular": "lagoon-molecular-v3",
-  primordial: "primordial-v1"
+  primordial: "primordial-v1",
+  "evolving-world": "evolving-world-v1"
 });
 
 const molecularMeasurements = [
@@ -28,10 +30,11 @@ function numbers(source, keys) {
   return result;
 }
 
-function samplesFrom(world, recorded, keys) {
+function samplesFrom(world, recorded, keys, extendSample) {
   const sample = (tick, reading) => {
     const data = numbers(reading, keys);
     if (typeof reading.phase === "string" && reading.phase.length <= 40) data.phase = reading.phase;
+    if (extendSample) extendSample(data, reading);
     return {tick, data};
   };
   const result = [];
@@ -59,8 +62,13 @@ function observedEvents(world, labels, replayedText = false) {
     const occurrence = (occurrences.get(prefix) || 0) + 1;
     occurrences.set(prefix, occurrence);
     const key = prefix + ":" + (Number.isSafeInteger(event.id) ? "id-" + event.id : "n-" + occurrence);
-    const data = numbers(event, ["id","parent","allocation","mutationDelta","x","y","amount","units"]);
+    const data = numbers(event, ["id","parent","parentId","lineage","allele","generation","allocation","mutationDelta","x","y","amount","units","count","forcing"]);
     data.text = replayedText ? event.text : labels[event.type];
+    if (labels === evolvingEvents) {
+      if (event.type === "start" && event.count === 0) data.text = "Mundo iniciado sem fundadores.";
+      if (event.type === "control") { data.control = event.control; data.enabled = event.enabled; }
+      if (event.type === "habitat") { data.habitat = event.habitat; data.previous = event.previous; }
+    }
     if (event.type === "start" && world.originSample) {
       const inoculum = world.originSample.inoculum;
       data.text = "Inoculação externa de uma célula virtual na amostra de superfície.";
@@ -137,9 +145,86 @@ function projectPrimordial(checkpoint) {
 // PrimordialWorld.restore recomputes these events from the seed and silicon intervention.
 const primordialEvents = { epoch:true, yield:true, control:true };
 
+const evolvingMeasurements = [
+  "population", "births", "deaths", "founderCount", "maxGeneration", "mutations", "meanTrait",
+  "maxLivingGeneration", "extinctionTick", "livingLineages", "bodyMass", "nutrientMass", "totalMass",
+  "initialMass", "nutrientInputTotal", "massError", "totalEnergy", "initialEnergy", "absorbedEnergy",
+  "dissipatedEnergy", "energyError", "meanTemperatureK", "meanHumidity",
+  "meanEnergy", "meanHabitability", "lagoonFraction", "waterInventory", "liquidWater", "iceWater",
+  "vaporWater", "waterError", "availableNutrient", "boundNutrient", "totalNutrient", "nutrientError",
+  "lightForcing", "meanBiota", "behaviorDecisions", "exploreDecisions", "behaviorRewardTotal", "learnedUpdates"
+];
+
+const evolvingEvents = {
+  start:"Fundadores introduzidos no mundo.", birth:"Nascimento observado.", death:"Morte observada.",
+  mutation:"Mutação observada.", extinction:"Extinção observada.", light:"A iluminação foi alterada.",
+  nutrient:"Entrada externa de nutriente.", control:"Um controle experimental mudou.", habitat:"Mudança de habitat."
+};
+
+function evolutionarySample(data, reading) {
+  for (const key of ["traitCounts", "traitFrequencies"]) {
+    const bins = reading[key];
+    if (Array.isArray(bins) && bins.length === 11 && bins.every(value => Number.isFinite(value) && value >= 0)) {
+      data[key] = bins.slice();
+    }
+  }
+  for (const key of ["extinct", "selectionEnabled", "mutationEnabled", "learningEnabled"]) {
+    if (typeof reading[key] === "boolean") data[key] = reading[key];
+  }
+  if (["ice", "lagoon", "wetland", "temperate", "dry"].includes(reading.dominantHabitat)) data.dominantHabitat = reading.dominantHabitat;
+  const counts = reading.habitatCounts;
+  if (counts && typeof counts === "object" && !Array.isArray(counts)) {
+    const pairs = Object.entries(counts).filter(([type,value]) =>
+      /^[a-z][a-z-]{0,32}$/.test(type) && Number.isSafeInteger(value) && value >= 0);
+    data.habitatCounts = Object.fromEntries(pairs);
+  }
+}
+
+function evolvingGenealogy(world) {
+  const seen = new Map();
+  function observe(identity, origin, tick) {
+    if (!identity || seen.has(identity.id)) return;
+    const {id, parentId, lineage, generation} = identity;
+    const allele = identity.genome?.allele ?? identity.allele;
+    const hasParent = Number.isSafeInteger(parentId) && parentId >= lineage && parentId < id;
+    if (!Number.isSafeInteger(id) || id < 1 || !Number.isSafeInteger(lineage) || lineage < 1 || lineage > id
+        || !Number.isSafeInteger(generation) || generation < 0 || (generation ? !hasParent : parentId !== null || id !== lineage)
+        || !Number.isInteger(allele) || allele < 0 || allele > 10 || !Number.isSafeInteger(tick) || tick < 0 || tick > world.tick) return;
+    const record = {id,parentId,lineage,generation,allele,trait:allele/10,observedIn:origin,observedAtTick:tick};
+    if ([-1, 0, 1].includes(identity.mutationDelta)) record.mutationDelta = identity.mutationDelta;
+    seen.set(id, record);
+  }
+  for (const org of world.organisms) observe(org, "living", world.tick);
+  for (let i = world.events.length - 1; i >= 0; i--) {
+    const event = world.events[i];
+    if (event.type === "birth" || event.type === "death") observe(event, event.type, event.tick);
+  }
+  return Array.from(seen.values());
+}
+
+function projectEvolving(checkpoint) {
+  const world = EvolvingWorld.restore(checkpoint);
+  const origin = world.environment.origin;
+  const minerals = origin?.kind === "primordial" && origin.formula === "Mg2SiO4" && origin.mineralUnits > 0 ? [{
+    key:"silicate-1", formula:origin.formula, source:origin.source, units:origin.mineralUnits,
+    recipe:{...PRIMORDIAL_MODEL.recipe}, firstTick:null, lastTick:null, inventoryScope:"source-disk",
+    scale:"representative", sourceSeed:origin.seed, sourceTick:origin.tick, sampleSites:origin.sites.length
+  }] : [];
+  const samples = samplesFrom(world, world.history, evolvingMeasurements, evolutionarySample);
+  const current = samples.at(-1).data;
+  current.mutationEnabled = world.controls.mutationEnabled;
+  current.selectionEnabled = world.controls.selectionEnabled;
+  current.learningEnabled = world.controls.learningEnabled;
+  return {
+    checkpoint:world.serialize(), engineVersion:MODEL_VERSIONS["evolving-world"], samples, minerals,
+    events:observedEvents(world, evolvingEvents), quantities:[], genealogy:evolvingGenealogy(world)
+  };
+}
+
 export function projectSnapshot(mode, checkpoint) {
   if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)) throw new TypeError("Checkpoint inválido");
   if (mode === "lagoon-molecular") return projectMolecular(checkpoint);
   if (mode === "primordial") return projectPrimordial(checkpoint);
+  if (mode === "evolving-world") return projectEvolving(checkpoint);
   throw new TypeError("Modo desconhecido");
 }

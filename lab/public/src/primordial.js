@@ -159,6 +159,8 @@ export class PrimordialWorld {
     if (this.lagoon) {
       sample.parcels = this.lagoon.particles.map(({id,x,y,kind}) => ({id,x,y,kind}))
       sample.energySource = {...this.lagoon.source}
+      sample.elementLedger = this.getMetrics().elements.map(({symbol,primordial,ejecta,gas,stellar,mineral,exported}) =>
+        ({symbol,primordial,ejecta,gas,stellar,mineral,exported}))
     }
     return sample
   }

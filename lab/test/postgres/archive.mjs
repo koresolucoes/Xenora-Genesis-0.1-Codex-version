@@ -1,3 +1,4 @@
+import { EvolvingWorld } from "../../public/src/evolving-world.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { main } from "./local-pg.mjs";
@@ -322,9 +323,15 @@ await main(async ({ admin, connect, schema }) => {
     3,
     "Overlapping identical events are deduplicated and changed values persist",
   );
-  for (const mode of ["primordial", "lagoon-molecular"]) {
-    const model =
-      mode === "primordial" ? new PrimordialWorld({ seed: 42 }) : new World(42);
+  // Upgrade an archive which already contains genuine revisions and capability hashes.
+  await schema("migrations/001-evolving-world.sql");
+  await schema("migrations/001-evolving-world.sql");
+  const models = {
+    primordial: new PrimordialWorld({ seed: 42 }),
+    "lagoon-molecular": new World(42),
+    "evolving-world": new EvolvingWorld(42)
+  };
+  for (const [mode, model] of Object.entries(models)) {
     for (let i = 0; i < 360; i++) model.step();
     const snapshot = model.serialize();
     const projected = projectSnapshot(mode, snapshot),
@@ -374,7 +381,7 @@ await main(async ({ admin, connect, schema }) => {
       pagination: true,
       forkTick: forked.checkpoint.tick,
       historicalDeduplication: true,
-      replayedModes: 2,
+      replayedModes: Object.keys(models).length,
     }),
   );
 });

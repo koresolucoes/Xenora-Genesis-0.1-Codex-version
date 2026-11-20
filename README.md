@@ -4,7 +4,7 @@ Experimental extraterrestrial prebiotic reaction–diffusion simulator in Rust. 
 
 ## Laboratório interativo
 
-O [Xenora · Lagoa](lab/README.md) simula organismos digitais em uma lagoa 2D com regras próprias de movimento, alimentação e reprodução. Para abrir no navegador, execute `python3 -m http.server 8000 --bind 127.0.0.1 --directory lab/public` na raiz do repositório e acesse `http://localhost:8000`. O laboratório usa seu próprio motor JavaScript, independente do experimento Rust descrito abaixo.
+O [Observatório Xenora](lab/README.md) acompanha habitats, competição, herança e aprendizagem em mundos digitais que podem ser bifurcados. A rota principal abre o campo evolutivo em tela cheia. A lagoa molecular e o percurso de Origens têm entradas próprias. Para abrir no navegador, execute `python3 -m http.server 8000 --bind 127.0.0.1 --directory lab/public` na raiz do repositório e acesse `http://localhost:8000`. O laboratório usa seu próprio motor JavaScript, independente do experimento Rust descrito abaixo.
 
 ## Local execution
 

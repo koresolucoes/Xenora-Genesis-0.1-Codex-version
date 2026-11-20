@@ -1,6 +1,7 @@
 import { PrimordialWorld, PRIMORDIAL_PHASES } from "./primordial.js";
 import { PrimordialView } from "./primordial-view.js";
 import { openSurfaceSample, getOriginReturn } from "./surface-link.js";
+import { openEvolvingPlanet, readEvolutionOrigin } from "./evolution-link.js";
 import { mountWorldArchive } from "./world-archive.js";
 
 const by = id => document.getElementById(id);
@@ -117,6 +118,7 @@ function showSelection(m, stage) {
   by("po-cluster").hidden = !lagoon?.observer.clusters.length;
   by("po-general").hidden = !selected;
   by("po-surface").hidden = !lagoon;
+  by("po-planet").hidden = stage < 5;
 }
 function draw() {
   const m = world.getMetrics(), stage = phases.indexOf(m.phase);
@@ -186,6 +188,10 @@ by("po-cluster").addEventListener("click",()=>{
   const i=groups.findIndex(c=>c.id===selection?.id && selection?.type==="cluster");
   choose({type:"cluster",id:groups[(i+1)%groups.length].id});
 });
+by("po-evolution").addEventListener("click", () => {
+  try { openEvolvingPlanet(world, Number(by("po-evolution-start").value)); }
+  catch (e) { put("po-error", e.message || "Não foi possível abrir a superfície planetária."); }
+});
 by("po-observe-cell").addEventListener("click", async () => {
   try { await openSurfaceSample(world); }
   catch (e) { put("po-error", e.message || "Não foi possível abrir a amostra da superfície."); }
@@ -250,7 +256,7 @@ document.addEventListener("visibilitychange",()=>{previous=null;elapsed=0;});
 new ResizeObserver(()=>{dirty=true;}).observe(by("po-canvas"));
 setRunning(true);
 try {
-  const returning = getOriginReturn();
+  const returning = readEvolutionOrigin() || getOriginReturn();
   if (returning) replace(PrimordialWorld.restore(returning));
 } catch (error) {
   setRunning(false);

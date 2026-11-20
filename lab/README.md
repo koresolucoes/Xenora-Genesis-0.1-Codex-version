@@ -1,10 +1,20 @@
-# Xenora · Lagoa
+# Xenora · Observatório de mundos
 
 A partir da pasta `lab/`, abra o laboratório servindo a pasta `public` com `python3 -m http.server 8000 --bind 127.0.0.1 --directory public` e acesse `http://localhost:8000`. A simulação e os checkpoints locais funcionam em hospedagem estática.
 
 Para repetir um experimento, use a mesma semente e mova a luz nos mesmos passos. O arquivo JSON de checkpoint permite retomar o estado do mundo, incluindo o gerador pseudoaleatório. O laboratório começa com organismos digitais programados. Matéria e energia são medidas em unidades arbitrárias próprias da simulação.
 
 Execute `npm test` na pasta `lab/` para verificar o replay, a conservação da matéria e a rejeição de checkpoints inválidos com o executor de testes do Node.js 22 ou superior.
+
+## Mundo evolutivo
+
+A rota principal abre o mapa de uma superfície planetária em evolução. A sonda consulta as reservas do solo, a água, a temperatura e os organismos do ponto selecionado. As camadas usam os campos do motor. A ampliação de 1× a 4× permite inspecionar o terreno e os indivíduos. O percurso cosmológico em `/primordial.html` pode fornecer uma amostra a partir da condensação mineral. A lagoa molecular anterior continua em `/lagoa.html`.
+
+Os habitats resultam das condições de cada região. A água pode mudar de fase e as condições podem favorecer gelo, terreno seco ou lâminas de água. Nos mundos com fundadores, os recursos e o desempenho fisiológico de cada indivíduo afetam a reprodução. Um alelo térmico é copiado durante a divisão e pode sofrer mutação. A aba **Histórico** mostra a distribuição dos onze alelos e as famílias sobreviventes. A aba **Ensaios** permite repetir uma trajetória com o efeito fisiológico do alelo desligado para medir a variação de frequências por outros mecanismos, incluindo a deriva.
+
+Na experiência de aprendizagem individual, a ação é ficar no sítio ou explorar um vizinho. O contexto distingue dois níveis locais de nutriente. O saldo de energia e a matéria assimilada após a ação atualizam a memória daquele indivíduo. Cada descendente começa com memória vazia. O ensaio duplica o mundo em foco, zera a memória individual nos dois ramos e compara 240 passos com aprendizagem ligada ou desligada. As taxas usam as decisões observadas em cada contexto. Também é possível baixar a tabela em CSV. A partir de `lab/`, execute `node test/experiments/evolving-selection.mjs` para o ensaio de seleção ou `node test/experiments/evolving-learning.mjs` para a comparação de aprendizagem em várias sementes.
+
+Na aba **Mundos**, até quatro execuções locais podem ser acompanhadas em paralelo, inclusive dois ramos da mesma população sob intensidades de luz diferentes. O arquivo remoto de revisões no Supabase fica na mesma aba. A sessão local do mundo em foco preserva pausa e velocidade. Ao reabrir uma execução, o navegador simula até 2.400 passos decorridos. O relógio do mundo só avança quando o motor executa seus passos.
 
 ## Experimentos na água
 
@@ -37,7 +47,7 @@ Na época de lagoa, um domínio local representa a superfície com 120 partícul
 
 ## Arquivo científico no Supabase
 
-Aplique `schema-supabase.sql` e em seguida `schema-origins.sql`, no mesmo projeto. O arquivo usa o gateway privado já configurado. Na interface de cada laboratório, **Salvar revisão** cria um mundo e um ramo ou acrescenta uma revisão à execução aberta. Em **Chave e histórico de revisões**, copie a chave para poder recuperar o mundo em outro navegador, abra um passo anterior e bifurque o ramo. A chave concede leitura e escrita nesse mundo. Uma chave anterior de checkpoint continua válida na opção **Experimento** da lagoa.
+Em instalações novas, aplique `schema-supabase.sql` e em seguida `schema-origins.sql`, no mesmo projeto. Para um arquivo já instalado na versão anterior, `migrations/001-evolving-world.sql` habilita o mundo evolutivo e preserva mundos, chaves e revisões existentes. O arquivo usa o gateway privado já configurado. Na interface de cada laboratório, **Salvar revisão** cria um mundo e um ramo ou acrescenta uma revisão à execução aberta. Em **Chave e histórico de revisões**, copie a chave para poder recuperar o mundo em outro navegador, abra um passo anterior e bifurque o ramo. A chave concede leitura e escrita nesse mundo. Uma chave anterior de checkpoint continua válida na opção **Experimento** da lagoa.
 
 As rotas sob `/api/worlds` aceitam os modos `primordial` e `lagoon-molecular`. O cliente gera os identificadores e o segredo do mundo antes do envio. A escrita usa um identificador de operação estável e a revisão esperada. O Worker restaura o estado, calcula as observações e envia o lote. O PostgreSQL arquiva a revisão e o recibo em uma transação. Uma repetição idêntica recebe o mesmo recibo, e uma escrita obsoleta recebe HTTP 409. Um fork copia o estado e as observações da revisão de origem. Uma revisão pode ser consultada independentemente do ramo corrente.
 

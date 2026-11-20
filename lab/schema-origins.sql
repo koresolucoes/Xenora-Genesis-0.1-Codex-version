@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS xenora_private.science_runs (
     world_id uuid NOT NULL REFERENCES xenora_private.science_worlds(id),
     id uuid NOT NULL,
     list_id bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
-    mode text NOT NULL CHECK (mode IN ('primordial','lagoon-molecular')),
+    mode text NOT NULL,
     engine_version text NOT NULL CHECK (length(engine_version) BETWEEN 1 AND 160),
     label text NOT NULL DEFAULT '',
     parent_run_id uuid,
@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS xenora_private.science_runs (
     CHECK ((parent_run_id IS NULL) = (parent_revision IS NULL)),
     CHECK (parent_run_id IS NULL OR (parent_run_id <> id AND parent_revision > 0))
 );
+
+-- Refresh the constraint as CREATE TABLE IF NOT EXISTS also covers older archives.
+ALTER TABLE xenora_private.science_runs DROP CONSTRAINT IF EXISTS science_runs_mode_check;
+ALTER TABLE xenora_private.science_runs ADD CONSTRAINT science_runs_mode_check
+    CHECK (mode IN ('primordial','lagoon-molecular','evolving-world'));
 
 CREATE TABLE IF NOT EXISTS xenora_private.science_revisions (
     world_id uuid NOT NULL,
@@ -248,6 +253,15 @@ BEGIN
                     'lineage',item->'lineage','generation',item->'generation',
                     'sequence',COALESCE(item->'sequence',item->'genome'->'sequence'),
                     'mutationDelta',item->'mutationDelta','observedIn',evidence_type,'observedAtTick',evidence_tick);
+                IF p_mode='evolving-world' THEN
+                    IF jsonb_typeof(item->'allele') IS DISTINCT FROM 'number'
+                       OR xenora_private.science_tick(item->'allele') > 10
+                       OR jsonb_typeof(item->'trait') IS DISTINCT FROM 'number'
+                       OR (item->>'trait')::numeric <> (item->>'allele')::numeric/10 THEN
+                        RAISE EXCEPTION 'Invalid thermal allele or trait' USING ERRCODE='PT400';
+                    END IF;
+                    entry:=entry||jsonb_build_object('allele',item->'allele','trait',item->'trait');
+                END IF;
                 IF COALESCE(jsonb_typeof(entry->'generation'),'null')<>'null' AND
                    xenora_private.science_tick(entry->'generation')>2147483647 THEN
                     RAISE EXCEPTION 'Invalid organism generation' USING ERRCODE='PT400';
@@ -307,7 +321,7 @@ BEGIN
     IF p_action='create' THEN
         IF NOT COALESCE(added,false) THEN RAISE EXCEPTION 'World already exists' USING ERRCODE='PT409'; END IF;
         rid:=(p_body#>>'{run,id}')::uuid;
-        IF rid IS NULL OR COALESCE(p_body#>>'{run,mode}','') NOT IN ('primordial','lagoon-molecular')
+        IF rid IS NULL OR COALESCE(p_body#>>'{run,mode}','') NOT IN ('primordial','lagoon-molecular','evolving-world')
            OR length(COALESCE(p_body#>>'{run,engineVersion}','')) NOT BETWEEN 1 AND 160 THEN
             RAISE EXCEPTION 'Missing run identity, mode or engine version' USING ERRCODE='PT400';
         END IF;
@@ -351,8 +365,10 @@ BEGIN
     IF jsonb_typeof(checked) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'Missing checkpoint object' USING ERRCODE='PT400';
     END IF;
-    IF (r.mode='primordial' AND checked->>'kind' IS DISTINCT FROM 'primordial') OR
-       (r.mode='lagoon-molecular' AND checked->>'kind'='primordial') THEN
+    IF (CASE WHEN checked->>'kind'='primordial' THEN 'primordial'
+             WHEN checked->>'mode'='evolving-world' THEN 'evolving-world'
+             WHEN NOT (checked ? 'kind' OR checked ? 'mode') THEN 'lagoon-molecular'
+        END) IS DISTINCT FROM r.mode THEN
         RAISE EXCEPTION 'Checkpoint mode mismatch' USING ERRCODE='PT400';
     END IF;
     IF p_action='append' AND (checked->'seed') IS DISTINCT FROM prior_seed THEN
