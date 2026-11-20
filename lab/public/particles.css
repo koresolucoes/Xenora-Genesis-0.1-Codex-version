@@ -126,3 +126,27 @@ body.pw-focus .pw-laboratory{grid-row:2/4}
 .pw-projection{position:absolute;left:clamp(15px,2.6vw,45px);top:7px;font:12px var(--mono);color:#bacbb9;background:#11231ed9;padding:4px 7px;border:1px solid #456051;border-radius:5px;pointer-events:none}
 #pw-physical-time{color:#b4bea8;font:13px var(--mono)}
 @media(max-width:700px){.pw-projection{left:9px;font-size:11px}.pw-world{gap:6px}.pw-world span{font-size:12px}#pw-physical-time{font-size:11px}.pw-header h1{gap:6px;font-size:19px}}
+.pw-side-head{padding-inline:5px}
+.pw-tabs button{letter-spacing:-.02em}
+.pw-bench .pw-panel-block>h2+.mb-current{margin-top:8px}
+.mb-current{font-family:var(--mono);font-size:13px!important}
+.pw-bench select{width:100%;display:block;margin-top:5px;scroll-margin-block:5px}
+.mb-checks{padding:0;list-style:none;margin:12px 0}
+.mb-checks li{border-top:1px solid var(--line);padding:8px 0}
+.mb-molecule{display:flex;align-items:baseline;flex-wrap:wrap;gap:5px;padding:7px 0;border-bottom:1px solid var(--line)}
+.mb-molecule>small{color:var(--muted);font-family:var(--mono);font-size:12px}
+.mb-atoms{width:100%;display:flex;flex-wrap:wrap;gap:4px}
+.mb-atoms button{font:12px var(--mono);min-height:27px;padding:3px 6px}
+.pw-bench details{margin-top:10px}
+.pw-bench p, .pw-bench dd,.pw-bench option{overflow-wrap:anywhere}
+.mb-key{display:block;font:12px/1.5 var(--mono);overflow-wrap:anywhere;color:var(--muted)}
+.mb-reaction{display:block;margin:8px 0;background:#14241f;padding:8px;border-radius:6px}
+.mb-reaction b{font-size:14px}
+.mb-reaction small{display:block;color:var(--muted);margin-top:3px}
+.pw-bench .mb-note{font-size:13px}
+.mb-result{margin:11px 0;border:1px solid var(--line);border-radius:7px;padding:10px}
+.mb-result h4,.mb-result h5{margin:3px 0 5px;font-size:15px}
+.mb-result ul{padding-left:16px;font-size:14px}
+.mb-result table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}
+.mb-result th,.mb-result td{padding:5px 3px;border-bottom:1px solid var(--line);text-align:right}
+.mb-result th:first-child,.mb-result td:first-child{text-align:left}

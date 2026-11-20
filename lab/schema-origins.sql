@@ -361,6 +361,63 @@ END;
 $$;
 REVOKE ALL ON FUNCTION xenora_private.validate_atomic_projection(jsonb,jsonb) FROM PUBLIC;
 
+-- A chemistry window is a bounded, checkpoint-reported journal. Structural
+-- identities describe only the saved graph; they are not an independent replay.
+CREATE OR REPLACE FUNCTION xenora_private.atomic_bench_coverage(c jsonb,b jsonb)
+RETURNS jsonb LANGUAGE plpgsql SET search_path='' AS $$
+DECLARE journal jsonb:=c->'reactionBench'; sample jsonb:=b#>'{samples,0,data}';
+    win jsonb:=sample->'reactionWindow'; census jsonb:=sample->'speciesCensus';
+    first_tick bigint; last_tick bigint; retained integer; edits bigint; exact_count integer;
+BEGIN
+    IF journal IS NULL THEN
+        IF win IS NOT NULL OR census IS NOT NULL THEN
+            RAISE EXCEPTION 'Unsupported historical bench claim' USING ERRCODE='PT400';
+        END IF;
+        RETURN '{}'::jsonb;
+    END IF;
+    IF jsonb_typeof(journal) IS DISTINCT FROM 'object' OR journal->'version' IS DISTINCT FROM '1'::jsonb
+       OR jsonb_typeof(journal->'frames') IS DISTINCT FROM 'array'
+       OR jsonb_typeof(win) IS DISTINCT FROM 'object' OR jsonb_typeof(census->'identified') IS DISTINCT FROM 'array' THEN
+        RAISE EXCEPTION 'Invalid reaction bench projection' USING ERRCODE='PT400';
+    END IF;
+    first_tick:=xenora_private.science_tick(journal->'startTick');
+    last_tick:=xenora_private.science_tick(journal->'tick');
+    retained:=jsonb_array_length(journal->'frames');
+    SELECT coalesce(sum(jsonb_array_length(f->'changes')),0) INTO edits FROM jsonb_array_elements(journal->'frames') f;
+    IF last_tick<first_tick OR last_tick-first_tick>128 OR retained>last_tick-first_tick OR edits>2048
+       OR journal->'tick' IS DISTINCT FROM c->'tick'
+       OR win->'startTick' IS DISTINCT FROM journal->'startTick' OR win->'endTick' IS DISTINCT FROM journal->'tick'
+       OR win->'comparedSteps' IS DISTINCT FROM to_jsonb(last_tick-first_tick)
+       OR win->'changedSteps' IS DISTINCT FROM to_jsonb(retained) OR win->'bondEdits' IS DISTINCT FROM to_jsonb(edits)
+       OR win->>'basis' IS DISTINCT FROM 'checkpoint-bond-edits'
+       OR census->>'scope' IS DISTINCT FROM 'current-graph-including-free-atoms'
+       OR sample->'integrationSubsteps' IS DISTINCT FROM coalesce(c->'integrationSubsteps','4'::jsonb) THEN
+        RAISE EXCEPTION 'Reaction coverage differs from saved window' USING ERRCODE='PT400';
+    END IF;
+    exact_count:=jsonb_array_length(census->'identified');
+    IF jsonb_typeof(win->'fromFs') IS DISTINCT FROM 'number' OR jsonb_typeof(win->'toFs') IS DISTINCT FROM 'number'
+       OR abs((win->>'fromFs')::numeric - first_tick*4.8)>1e-12*greatest(1,first_tick)
+       OR abs((win->>'toFs')::numeric - last_tick*4.8)>1e-12*greatest(1,last_tick)
+       OR EXISTS(SELECT FROM jsonb_array_elements(census->'identified') s
+              WHERE jsonb_typeof(s->'key') IS DISTINCT FROM 'string' OR length(s->>'key')=0
+                OR jsonb_typeof(s->'formula') IS DISTINCT FROM 'string' OR length(s->>'formula')=0
+                OR xenora_private.science_tick(s->'count')<1)
+       OR exact_count<>(SELECT count(DISTINCT s->>'key') FROM jsonb_array_elements(census->'identified') s)
+       OR xenora_private.science_tick(census->'unresolvedComponents')+
+          (SELECT coalesce(sum((s->>'count')::bigint),0) FROM jsonb_array_elements(census->'identified') s)
+          <>jsonb_array_length(c->'particles')+jsonb_array_length(b->'events')-
+          (SELECT coalesce(sum(jsonb_array_length(e#>'{data,members}')),0) FROM jsonb_array_elements(b->'events') e)
+       OR EXISTS(SELECT FROM jsonb_array_elements(b->'events') e
+              WHERE NOT (e->'data' ? 'speciesIndex') OR (e#>'{data,speciesIndex}'<>'null'::jsonb AND
+                   (xenora_private.science_tick(e#>'{data,speciesIndex}')>=exact_count
+                    OR (census->'identified'->(e#>>'{data,speciesIndex}')::integer->'formula') IS DISTINCT FROM e#>'{data,formula}'))) THEN
+        RAISE EXCEPTION 'Invalid current species census' USING ERRCODE='PT400';
+    END IF;
+    RETURN jsonb_build_object('reactionWindow',win,'speciesBasis','current graph including free atoms');
+END;
+$$;
+REVOKE ALL ON FUNCTION xenora_private.atomic_bench_coverage(jsonb,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+
 CREATE OR REPLACE FUNCTION public.xenora_gateway_write_science(
     p_world uuid,p_hash text,p_request uuid,p_action text,p_body jsonb
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -368,7 +425,7 @@ DECLARE
     w xenora_private.science_worlds%ROWTYPE; r xenora_private.science_runs%ROWTYPE;
     src xenora_private.science_revisions%ROWTYPE; prev xenora_private.science_requests%ROWTYPE;
     added boolean:=false; sig bytea; rid uuid; pid uuid; rev integer; src_rev integer;
-    checked jsonb; cov jsonb; result jsonb; t bigint; preceding_tick bigint; prior_seed jsonb;
+    checked jsonb; cov jsonb; result jsonb; t bigint; preceding_tick bigint; prior_seed jsonb; prior_substeps jsonb;
 BEGIN
     PERFORM xenora_private.require_gateway();
     IF p_world IS NULL OR p_hash IS NULL OR p_hash !~ '^[0-9A-Fa-f]{64}$' THEN
@@ -417,7 +474,8 @@ BEGIN
            (p_body ? 'engineVersion' AND p_body->>'engineVersion' IS DISTINCT FROM r.engine_version) THEN
             RAISE EXCEPTION 'Run mode or engine version changed' USING ERRCODE='PT409';
         END IF;
-        SELECT tick,checkpoint->'seed' INTO preceding_tick,prior_seed FROM xenora_private.science_revisions
+        SELECT tick,checkpoint->'seed',coalesce(checkpoint->'integrationSubsteps','4'::jsonb)
+            INTO preceding_tick,prior_seed,prior_substeps FROM xenora_private.science_revisions
             WHERE world_id=p_world AND run_id=rid AND revision=r.head;
     ELSE
         IF p_body ?| ARRAY['checkpoint','events','samples','quantities','minerals','genealogy'] THEN
@@ -484,6 +542,12 @@ BEGIN
         END IF;
     END IF;
     IF r.mode='particle-world' AND r.engine_version='particle-world-v2' AND p_action<>'fork' THEN
+        IF coalesce(checked->'integrationSubsteps','4'::jsonb) NOT IN ('4'::jsonb,'8'::jsonb) THEN
+            RAISE EXCEPTION 'Invalid atomic integration step' USING ERRCODE='PT400';
+        END IF;
+        IF p_action='append' AND coalesce(checked->'integrationSubsteps','4'::jsonb) IS DISTINCT FROM prior_substeps THEN
+            RAISE EXCEPTION 'Integration step changed within run' USING ERRCODE='PT409';
+        END IF;
         PERFORM xenora_private.validate_atomic_projection(checked,p_body);
     END IF;
     IF (CASE WHEN checked->>'kind'='primordial' THEN 'primordial'
@@ -509,6 +573,7 @@ BEGIN
         IF r.mode='particle-world' AND r.engine_version='particle-world-v2' THEN
             cov:=cov||jsonb_build_object('genealogyBasis','not projected in atomic version 2',
                 'sampleBasis','validated checkpoint tick','eventBasis','connected molecules observed at checkpoint tick');
+            cov:=cov||xenora_private.atomic_bench_coverage(checked,p_body);
         ELSIF r.mode='particle-world' THEN
             cov:=cov||jsonb_build_object('genealogyBasis','not projected in particle-world-v1',
                 'sampleBasis','validated checkpoint tick','eventBasis','past events not independently replayed');

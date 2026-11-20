@@ -1,7 +1,8 @@
 import { World, validEventIndividual } from "./public/src/engine.js";
 import { EvolvingWorld } from "./public/src/evolving-world.js";
 import { PRIMORDIAL_MODEL, PrimordialWorld } from "./public/src/primordial.js";
-import { AtomicWorld } from "./public/src/atomic-world.js";
+import { AtomicWorld, ATOMIC_PHYSICS } from "./public/src/atomic-world.js";
+import { getCurrentSpecies } from "./public/src/reaction-bench.js";
 
 // Archive model identities are independent of the saved JSON format.
 // Advance the appropriate identifier when evolution or numerical rules change.
@@ -223,6 +224,31 @@ function projectEvolving(checkpoint) {
   };
 }
 
+function appendBenchObservation(world, bench, events, data) {
+  const groups=getCurrentSpecies(world);
+  const exact=groups.filter(group=>group.status==="exact")
+    .sort((a,b)=>a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  const speciesByAtom=new Map();
+  data.speciesCensus={
+    scope:"current-graph-including-free-atoms",
+    identified:exact.map((group,index)=>{
+      for (const instance of group.instances) for(const id of instance.members) speciesByAtom.set(id,index);
+      return {key:group.key,formula:group.formula,count:group.count};
+    }),
+    unresolvedComponents:groups.reduce((n,group)=>n+(group.status==="unresolved" ? group.count : 0),0)
+  };
+  for (const entry of events) {
+    entry.data.speciesIndex=speciesByAtom.get(entry.data.members[0]) ?? null;
+  }
+  const ticks=bench.tick-bench.startTick, tickFs=ATOMIC_PHYSICS.tickFs;
+  data.reactionWindow={
+    basis:"checkpoint-bond-edits", startTick:bench.startTick, endTick:bench.tick,
+    fromFs:bench.startTick*tickFs, toFs:bench.tick*tickFs, comparedSteps:ticks,
+    changedSteps:bench.frames.length, bondEdits:bench.frames.reduce((n,frame)=>n+frame.changes.length,0)
+  };
+  data.integrationSubsteps=world.integrationSubsteps ?? 4;
+}
+
 function projectAtomic(checkpoint) {
   const world=AtomicWorld.restore(checkpoint);
   const stocks=new Map(["C","H","N","O","P","S"].map(symbol=>[symbol,{symbol,count:0,massU:0}]));
@@ -244,7 +270,11 @@ function projectAtomic(checkpoint) {
       "idealPressurePa","kineticEnergyEv","potentialEnergyEv","totalEnergyEv","initialEnergyEv","bathWorkEv",
       "volumeWorkEv","reactionHeatEv","initialMassU","massError","energyError",
       "netCharge","distinctFormulas","ringMolecules","largestMoleculeAtoms"])};
-  return {checkpoint:world.serialize(),engineVersion:MODEL_VERSIONS["particle-world"],
+  const canonical=world.serialize();
+  // The SQL idempotency receipt hashes the full write. An unadvanced file from
+  // before the bench must still generate exactly its original RPC projection.
+  if (checkpoint.reactionBench) appendBenchObservation(world,canonical.reactionBench,events,data);
+  return {checkpoint:canonical,engineVersion:MODEL_VERSIONS["particle-world"],
     samples:[{tick:world.tick,data}],quantities:[...stocks.values()],events,minerals:[],genealogy:[]};
 }
 

@@ -22,6 +22,30 @@ A cena permite selecionar átomos, ligações e moléculas no mesmo passo. Os co
 
 Para atualizar um banco que já aplicou a migração 002, aplique `migrations/003-atomic-world.sql`. Instalações novas usam `schema-supabase.sql` e `schema-origins.sql`.
 
+## Bancada de reações moleculares
+
+No microscópio, abra **Bancada**. Cada espécie é identificada pelo elemento, isótopo, carga, conectividade e ordens de ligação. Os IDs individuais ficam disponíveis para rastrear os átomos. Espécies com a mesma fórmula podem ter identidades diferentes. A chave descreve conectividade, sem resolução de estereoquímica. Uma busca que excede seu orçamento computacional permanece inconclusiva.
+
+A tabela agrupa associações, dissociações e rearranjos por identidade dos reagentes e produtos. Mostra as ocorrências, as evidências materiais e a duração dos produtos. A observação mantém até 128 passos, limitada também a 2.048 edições de ligações. Os tempos são amostrados a cada 4,8 fs. Produtos ainda presentes têm apenas um tempo mínimo de sobrevivência observado. Os existentes antes da janela são identificados como observação inicial, sem atribuir uma formação passada.
+
+A exportação CSV leva o intervalo, as contagens e os resultados de persistência. A consulta ao painel é passiva. Ao restaurar um v2 anterior à bancada, o primeiro intervalo começa no passo restaurado e preserva o checkpoint antigo até que a execução avance.
+
+### Ensaios H₂ e H₂O
+
+Em **Bancada**, use **Medir H₂ e H₂O**. O ensaio prepara moléculas isoladas de topologia fixa e usa o potencial e o integrador do motor. A comparação usa o mesmo tempo físico, 480 fs, com subpassos de 1,2 e 0,6 fs e 401 amostras por trajetória. As tolerâncias de triagem adotadas são 2% para comprimento, 3° para ângulo e 10% para frequência. Elas são critérios do modelo. A referência não modifica o mundo em foco.
+
+| Medida | Motor atual | Referência | Resultado da triagem |
+| --- | --- | --- | --- |
+| Comprimento H–H | 0,062000 nm | 0,074144 nm | Inadequado |
+| Frequência harmônica de H₂, pela curvatura | 943,614 cm⁻¹ | 4.401,213 cm⁻¹ | Inadequado |
+| Frequência de H₂, pela trajetória | Sem medida confiável | 4.401,213 cm⁻¹ | Sem medida |
+| Comprimento O–H | 0,097000 nm | 0,095777 nm | Aceito |
+| Ângulo H–O–H | 60,406° | 104,48° | Inadequado |
+
+O integrador repetiu posições em 284 de 400 subpassos de H₂ e em 654 de 800 ao reduzir o passo. A comparação exibe esse dado junto da correção energética acumulada. O saldo energético fechado precisa ser interpretado com essas medições. Esses resultados delimitam falhas atuais de geometria e dinâmica. [Referência de H₂](https://webbook.nist.gov/cgi/cbook.cgi?ID=C1333740&Mask=1000) · [Geometria espectroscópica da água](https://doi.org/10.1063/1.1924506)
+
+Para reproduzir o relatório JSON, execute `node test/experiments/molecular-reference.mjs` em `lab/`. O número de subpassos é fixo em cada execução. Checkpoints anteriores usam quatro. O protocolo da bancada inclui a migração incremental `migrations/004-reaction-bench.sql`, aplicada após a 003.
+
 ## Limite científico atual
 
 O objetivo é estudar a formação de estruturas materiais que possam sustentar manutenção, reprodução e herança. O núcleo atual trata formação e transformação de moléculas no seu modelo reduzido. Para demonstrar organismos surgindo desse substrato, ainda é necessário obter compartimentação funcional, metabolismo acoplado e reprodução sustentada. As evidências de cada etapa devem vir das trajetórias dos mesmos átomos.

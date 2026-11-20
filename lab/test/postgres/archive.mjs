@@ -331,6 +331,8 @@ await main(async ({ admin, connect, schema }) => {
   await schema("migrations/002-particle-world.sql");
   await schema("migrations/003-atomic-world.sql");
   await schema("migrations/003-atomic-world.sql");
+  await schema("migrations/004-reaction-bench.sql");
+  await schema("migrations/004-reaction-bench.sql");
   const models = {
     primordial: new PrimordialWorld({ seed: 42 }),
     "lagoon-molecular": new World(42),
@@ -360,8 +362,14 @@ await main(async ({ admin, connect, schema }) => {
     assert.deepEqual(restored.checkpoint, projected.checkpoint);
     if (mode === "particle-world") {
       assert.equal(restored.coverage.sampleBasis,"validated checkpoint tick");
+      assert.deepEqual(restored.coverage.reactionWindow,observations.samples[0].data.reactionWindow);
+      assert.equal(restored.coverage.speciesBasis,"current graph including free atoms");
       const next={...observations,runId,expectedRevision:1,mode,engineVersion};
       await rejected(write(owner,"append",{...next,quantities:[]},randomUUID(),worldId),"PT400");
+      const wrongStep=structuredClone(next);wrongStep.checkpoint.integrationSubsteps=8;
+      await rejected(write(owner,"append",wrongStep,randomUUID(),worldId),"PT409");
+      const wrongWindow=structuredClone(next);wrongWindow.samples[0].data.reactionWindow.startTick++;
+      await rejected(write(owner,"append",wrongWindow,randomUUID(),worldId),"PT400");
       await rejected(write(owner,"append",{...next,genealogy:[{id:1}]},randomUUID(),worldId),"PT400");
       const forkRun=randomUUID();
       await write(owner,"fork",{run:{id:forkRun},parentRunId:runId,parentRevision:1},randomUUID(),worldId);

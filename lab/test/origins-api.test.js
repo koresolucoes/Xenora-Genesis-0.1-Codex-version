@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import app from "../worker.js";
 import { World } from "../public/src/engine.js";
@@ -273,4 +275,63 @@ test("atomic archive reports elemental stocks and measured connected components 
   broken.checkpoint.particles[0].element="Q";
   assert.equal((await save(broken)).status,422);
   assert.equal((await save({...input,quantities:[]})).status,400);
+});
+
+test("a pre-bench atomic checkpoint still generates its original idempotent scientific write", async t=>{
+  const fixture=JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/atomic-v2-pre-bench.json.gz",import.meta.url))));
+  let saved;
+  t.mock.method(globalThis,"fetch",async(_url,options)=>{
+    saved=JSON.parse(options.body).p_body;
+    return Response.json({revision:1});
+  });
+  const input={mode:"particle-world",worldId:randomUUID(),runId:randomUUID(),checkpoint:fixture};
+  const save=body=>app.fetch(request("",{method:"POST",token:"b".repeat(64),operation:randomUUID(),body}),env);
+  assert.equal((await save(input)).status,201);
+  const {run,...records}=saved;
+  function sorted(value) {
+    if(Array.isArray(value))return value.map(sorted);
+    if(value && typeof value==="object")return Object.fromEntries(Object.keys(value).sort().map(k=>[k,sorted(value[k])]));
+    return value;
+  }
+  const hash=createHash("sha256").update(JSON.stringify(sorted({engineVersion:run.engineVersion,...records}))).digest("hex");
+  assert.equal(hash,"0d94421e9e91fa5d3b4377e8e707f1f5f038ffdde548f1cb9a7a0ea426921e01");
+  assert.deepEqual(saved.checkpoint,fixture);
+  const resumed=AtomicWorld.restore(fixture);
+  resumed.step();
+  assert.equal((await save({...input,checkpoint:resumed.serialize()})).status,201);
+  const sample=saved.samples[0].data;
+  assert.equal(sample.reactionWindow.startTick,fixture.tick);
+  assert.equal(sample.reactionWindow.endTick,resumed.tick);
+  assert.equal(sample.reactionWindow.comparedSteps,1);
+  assert.equal(sample.integrationSubsteps,4);
+  assert.equal(sample.speciesCensus.identified.every(g=>typeof g.key==="string" && g.count>0),true);
+  const identified=sample.speciesCensus.identified;
+  for(const entry of saved.events) {
+    if(entry.data.speciesIndex!==null)assert.equal(entry.data.formula,identified[entry.data.speciesIndex].formula);
+  }
+  const broken=resumed.serialize();
+  broken.reactionBench.tick++;
+  assert.equal((await save({...input,checkpoint:broken})).status,422);
+});
+
+test("the archive retains a connected 384-atom graph whose species identity is unresolved", async t=>{
+  const {connectedAtomicFixture}=await import("./fixtures/atomic-connected-stress.mjs");
+  const checkpoint=connectedAtomicFixture();
+  let saved;
+  t.mock.method(globalThis,"fetch",async(_url,options)=>{
+    saved=JSON.parse(options.body).p_body;
+    return Response.json({revision:1});
+  });
+  const body={mode:"particle-world",worldId:randomUUID(),runId:randomUUID(),checkpoint};
+  const response=await app.fetch(request("",{method:"POST",token:"b".repeat(64),operation:randomUUID(),body}),env);
+  assert.equal(response.status,201);
+  assert.deepEqual(saved.checkpoint,checkpoint);
+  const restored=AtomicWorld.restore(saved.checkpoint);
+  assert.equal(restored.molecules().length,1);
+  assert.equal(restored.molecules()[0].members.length,384);
+  const data=saved.samples[0].data;
+  assert.deepEqual(data.speciesCensus.identified,[]);
+  assert.equal(data.speciesCensus.unresolvedComponents,1);
+  assert.equal(data.reactionWindow.comparedSteps,0);
+  assert.equal(saved.events[0].data.speciesIndex,null);
 });

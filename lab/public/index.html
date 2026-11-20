@@ -38,6 +38,7 @@
       <div class="pw-side-head"><div role="tablist" aria-label="Instrumentos" class="pw-tabs">
         <button id="pw-tab-inspect" role="tab" aria-selected="true" aria-controls="pw-panel-inspect" type="button" data-tab="inspect">Inspeção</button>
         <button id="pw-tab-environment" role="tab" aria-selected="false" aria-controls="pw-panel-environment" type="button" data-tab="environment" tabindex="-1">Ambiente</button>
+        <button id="pw-tab-bench" role="tab" aria-selected="false" aria-controls="pw-panel-bench" type="button" data-tab="bench" tabindex="-1">Bancada</button>
         <button id="pw-tab-evidence" role="tab" aria-selected="false" aria-controls="pw-panel-evidence" type="button" data-tab="evidence" tabindex="-1">Evidências</button>
       </div><button type="button" id="pw-collapse" aria-label="Recolher instrumentos" aria-expanded="true">⌄</button></div>
       <div class="pw-side-body">
@@ -54,6 +55,7 @@
           <div class="pw-panel-block"><details><summary>Novo mundo e ramos</summary><form id="pw-new"><label>Semente <input id="pw-seed" type="number" min="0" max="4294967295" step="1" value="42" required></label><button type="submit">Abrir no passo zero</button></form><div id="particle-session"></div></details></div>
           <div class="pw-panel-block"><details><summary>Referências físicas e químicas</summary><ul id="pw-sources"></ul></details></div><div class="pw-panel-block"><details><summary>Arquivos e revisões</summary><section id="world-archive" aria-label="Arquivo do mundo atômico"></section><a href="./recovery.html">Recuperar arquivo anterior</a></details></div>
         </section>
+        <section id="pw-panel-bench" role="tabpanel" aria-labelledby="pw-tab-bench" hidden><div id="molecular-bench"></div></section>
         <section id="pw-panel-evidence" role="tabpanel" aria-labelledby="pw-tab-evidence" hidden>
           <div class="pw-panel-block"><h2>Evidências do campo</h2><p id="pw-evidence-summary"></p><dl class="pw-data" id="pw-evidence"></dl><p>O ciclo é um anel de ligações. Membranas, compartimentação, metabolismo, reprodução e vida permanecem sem demonstração neste modelo.</p></div>
           <div class="pw-panel-block"><h3>Últimos eventos</h3><ol id="pw-events"></ol></div>

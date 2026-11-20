@@ -3,6 +3,7 @@
 // Coordinates, interactions and topology are resolved; orbitals are not.
 import {ATOMIC_ELEMENTS,ATOMIC_SYMBOLS,maxBondOrder,bondEnergyEv} from './atomic-elements.js'
 import {observeAtomicWorld,validateAtomicObservation} from './atomic-observer.js'
+import {updateReactionBench,validateReactionBench} from './reaction-bench.js'
 
 const KB=8.617333262e-5, UVEL=10364.2696563, U_KG=1.66053906660e-27, EV_J=1.602176634e-19
 const DT=1.2, SUBS=4, RC=.40, DEPTH=.013, STEEP=13, SPRING=165, MAX=384
@@ -110,11 +111,16 @@ function scaleVelocity(ps,factor){
 }
 
 export class AtomicWorld {
+  #substeps
   get kind(){return 'particle-world'}
   get mode(){return 'particle-world'}
   get version(){return 2}
+  get integrationSubsteps(){return this.#substeps}
+  get integrationDtFs(){return DT*SUBS/this.#substeps}
   constructor(seed=42,options={}){
     const count=options.count??144
+    this.#substeps=options.integrationSubsteps===undefined?SUBS:options.integrationSubsteps
+    check(this.#substeps===SUBS || this.#substeps===2*SUBS)
     this.targetTemperatureK=options.temperatureK??300;this.volumeNm3=options.volumeNm3??12
     check(integer(seed,0,0xffffffff)&&integer(count,0,MAX)&&finite(this.targetTemperatureK,1,3000)&&finite(this.volumeNm3,1,512))
     this.initialTemperatureK=this.targetTemperatureK;this.initialVolumeNm3=this.volumeNm3
@@ -142,6 +148,8 @@ export class AtomicWorld {
     this.initialEnergyEv=energyK(this.particles)+this.field.potential
     this.initialMassU=this.particles.reduce((s,p)=>s+p.massU,0)
     this.observer=observeAtomicWorld(this,null)
+    this.reactionBench=updateReactionBench(this)
+    this.benchLegacyOmitted=false
     this.log('start','Átomos neutros livres introduzidos no recipiente.');this.record()
   }
   log(type,text,details={}){
@@ -209,20 +217,21 @@ export class AtomicWorld {
     if(this.flux.formed.length||this.flux.broken.length||this.flux.upgraded.length)this.field=forces(this)
   }
   integrate(){
+    const dt=this.integrationDtFs
     const ps=this.particles,k0=energyK(ps),u0=this.field.potential
     const before=new Float64Array(ps.length*6)
     for(let i=0;i<ps.length;i++){
-      const p=ps[i],factor=.5*DT/(UVEL*p.massU)
+      const p=ps[i],factor=.5*dt/(UVEL*p.massU)
       for(let k=0;k<3;k++){
         before[6*i+k]=p[keys[k]];before[6*i+3+k]=p[vk[k]]
         p[vk[k]]+=factor*this.field.f[3*i+k]
-        let pos=p[keys[k]]+DT*p[vk[k]]/this.sideNm
+        let pos=p[keys[k]]+dt*p[vk[k]]/this.sideNm
         if(pos<0||pos>1){const folded=((pos%2)+2)%2;pos=folded>1?2-folded:folded;if(folded>1)p[vk[k]]*=-1}
         p[keys[k]]=pos
       }
     }
     const f=forces(this)
-    for(let i=0;i<ps.length;i++)for(let k=0;k<3;k++)ps[i][vk[k]]+=.5*DT*f.f[i*3+k]/(UVEL*ps[i].massU)
+    for(let i=0;i<ps.length;i++)for(let k=0;k<3;k++)ps[i][vk[k]]+=.5*dt*f.f[i*3+k]/(UVEL*ps[i].massU)
     const target=k0+u0-f.potential, k1=energyK(ps)
     // Velocity-Verlet with a microcanonical energy projection: correct its
     // small truncation error and report the cumulative absolute correction.
@@ -238,13 +247,15 @@ export class AtomicWorld {
   step(){
     this.tick++;this.flux={formed:[],broken:[],upgraded:[],reactionHeatEv:0,bathWorkEv:0}
     this.changeBonds()
-    for(let sub=0;sub<SUBS;sub++)this.integrate()
+    for(let sub=0;sub<this.integrationSubsteps;sub++)this.integrate()
     if(this.controls.thermostatEnabled&&this.particles.length){
       const k=energyK(this.particles),want=1.5*this.particles.length*KB*this.targetTemperatureK
       const next=k+(want-k)*(-Math.expm1(-SUBS*DT/85))
       if(k>0){scaleVelocity(this.particles,Math.sqrt(next/k));this.flux.bathWorkEv=next-k;this.bathWorkEv+=next-k}
     }
     this.observer=observeAtomicWorld(this,this.observer)
+    this.reactionBench=updateReactionBench(this,this.reactionBench)
+    this.benchLegacyOmitted=false
     if(this.tick%10===0)this.record()
     return this.tick
   }
@@ -259,7 +270,7 @@ export class AtomicWorld {
       bondCount:this.bonds.length,moleculeCount:this.observer?.molecules?.length??0,elementCounts,totalMassU,totalMass:totalMassU,
       initialMassU:this.initialMassU,massError:totalMassU-this.initialMassU,totalProtons,totalNeutrons,totalElectrons,netCharge:totalProtons-totalElectrons,
       volumeNm3:this.volumeNm3,sideNm:this.sideNm,densityKgM3:totalMassU*U_KG/(this.volumeNm3*1e-27),temperatureK,
-      targetTemperatureK:this.targetTemperatureK,idealPressurePa:2*kinetic*EV_J/(3*this.volumeNm3*1e-27),
+      integrationSubsteps:this.integrationSubsteps,integrationDtFs:this.integrationDtFs,targetTemperatureK:this.targetTemperatureK,idealPressurePa:2*kinetic*EV_J/(3*this.volumeNm3*1e-27),
       pressurePa:(2*kinetic+this.field.virial)*EV_J/(3*this.volumeNm3*1e-27),
       kineticEnergyEv:kinetic,potentialEnergyEv:this.field.potential,weakPotentialEv:this.field.weak,covalentPotentialEv:this.field.covalent,
       totalEnergyEv:energy,initialEnergyEv:this.initialEnergyEv,bathWorkEv:this.bathWorkEv,volumeWorkEv:this.volumeWorkEv,
@@ -277,6 +288,8 @@ export class AtomicWorld {
   }
   serialize(){
     return clone({kind:'particle-world',mode:'particle-world',version:2,seed:this.seed,tick:this.tick,
+      ...(this.integrationSubsteps===SUBS?{}:{integrationSubsteps:this.integrationSubsteps}),
+      ...(this.benchLegacyOmitted?{}:{reactionBench:this.reactionBench}),
       targetTemperatureK:this.targetTemperatureK,volumeNm3:this.volumeNm3,controls:this.controls,particles:this.particles,
       bonds:this.bonds,observer:this.observer,initialMassU:this.initialMassU,initialEnergyEv:this.initialEnergyEv,
       initialTemperatureK:this.initialTemperatureK,initialVolumeNm3:this.initialVolumeNm3,
@@ -288,7 +301,9 @@ export class AtomicWorld {
     check(d?.mode==='particle-world'&&d.kind===d.mode&&d.version===2&&integer(d.seed,0,0xffffffff)&&integer(d.tick)&&
       Array.isArray(d.particles)&&d.particles.length<=MAX&&Array.isArray(d.bonds)&&d.controls&&controls.every(k=>typeof d.controls[k]==='boolean')&&
       finite(d.targetTemperatureK,1,3000)&&finite(d.volumeNm3,1,512)&&finite(d.initialTemperatureK,1,3000)&&finite(d.initialVolumeNm3,1,512))
-    const w=new AtomicWorld(d.seed,{count:d.particles.length,temperatureK:d.initialTemperatureK,volumeNm3:d.initialVolumeNm3,...d.controls})
+    const w=new AtomicWorld(d.seed,{count:d.particles.length,integrationSubsteps:d.integrationSubsteps,
+      temperatureK:d.initialTemperatureK,volumeNm3:d.initialVolumeNm3,bindingEnabled:d.controls.bindingEnabled,
+      thermostatEnabled:d.controls.thermostatEnabled})
     check(d.initialMassU===w.initialMassU&&finite(d.initialEnergyEv)&&
       Math.abs(d.initialEnergyEv-w.initialEnergyEv)<1e-11*Math.max(1,Math.abs(w.initialEnergyEv)))
     w.initialEnergyEv=d.initialEnergyEv
@@ -345,6 +360,13 @@ export class AtomicWorld {
     if(d.tick>0)check(finite(d.flux.bathWorkEv)&&finite(d.flux.reactionHeatEv))
     w.bonds=clone(d.bonds);w.field=forces(w);w.flux=clone(d.flux);w.events=clone(d.events);w.history=clone(d.history)
     w.observer=clone(d.observer);check(validateAtomicObservation(w,w.observer)!==false)
+    if(Object.hasOwn(d,'reactionBench')){
+      check(validateReactionBench(w,d.reactionBench))
+      w.reactionBench=clone(d.reactionBench)
+    }else{
+      w.reactionBench=updateReactionBench(w)
+      w.benchLegacyOmitted=true
+    }
     const m=w.getMetrics();check(Math.abs(m.energyError)<1e-7*Math.max(1,Math.abs(w.initialEnergyEv),Math.abs(w.volumeWorkEv),Math.abs(w.reactionHeatEv)))
     const last=w.history.at(-1)
     if(last.tick===w.tick)for(const key of Object.keys(last)){
@@ -352,4 +374,46 @@ export class AtomicWorld {
     }
     return w
   }
+}
+
+// Isolated diagnostic fixture. Both the potential and the integrator below
+// are the production implementations. No free-atom trajectory is overwritten
+// and this prepared topology never enters the checkpoint/archive protocol.
+export function createMolecularReferenceFixture(formula,integrationSubsteps=4) {
+  check(['H2','H2O'].includes(formula) && [4,8].includes(integrationSubsteps))
+  const world=new AtomicWorld(0,{count:0,volumeNm3:8,integrationSubsteps,
+    temperatureK:1,bindingEnabled:false,thermostatEnabled:false})
+  const symbols=formula==='H2'?['H','H']:['O','H','H']
+  world.particles=symbols.map((symbol,i)=>{
+    const e=ATOMIC_ELEMENTS[symbol]
+    return {id:i+1,element:symbol,mass:e.massU,massU:e.massU,radiusPm:e.covalentRadiusPm,protons:e.protons,
+      neutrons:e.neutrons,electrons:e.electrons,charge:0,x:0.5,y:0.5,z:0.5,vx:0,vy:0,vz:0}
+  })
+  world.bonds=symbols.slice(1).map((symbol,i)=>{
+    const bond={a:1,b:i+2,order:1,formedAt:0,energyEv:bondEnergyEv(symbols[0],symbol,1)}
+    bond.rest=world.bondRest(bond)
+    return bond
+  })
+  function reset(coordinatesNm) {
+    check(coordinatesNm.length===symbols.length)
+    for(let i=0;i<symbols.length;i++){
+      const p=world.particles[i]
+      check(coordinatesNm[i].length===3)
+      for(let k=0;k<3;k++){
+        check(finite(coordinatesNm[i][k],-0.8,0.8))
+        p[keys[k]]=0.5+coordinatesNm[i][k]/world.sideNm
+        p[vk[k]]=0
+      }
+    }
+    world.field=forces(world)
+    world.integrationCorrectionEv=0
+    world.initialEnergyEv=world.field.potential
+    return world.initialEnergyEv
+  }
+  function sample() {
+    return {coordinatesNm:world.particles.map(p=>keys.map(k=>(p[k]-0.5)*world.sideNm)),
+      energyEv:world.field.potential+energyK(world.particles),correctionEv:world.integrationCorrectionEv}
+  }
+  return Object.freeze({formula,integrationSubsteps,dtFs:world.integrationDtFs,reset,sample,
+    advance(){world.integrate(); return sample()}})
 }

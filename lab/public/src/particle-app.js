@@ -1,3 +1,4 @@
+import {mountMolecularBench} from './molecular-bench-panel.js';
 import {AtomicWorld, ATOMIC_PHYSICS} from './atomic-world.js';
 import {sampleProperties} from './material-properties.js';
 import {ATOMIC_ELEMENTS, ATOMIC_SOURCES} from './atomic-elements.js';
@@ -19,6 +20,10 @@ let world=readParticleSession()??new AtomicWorld(42);
 let running=false,speed=1,pending=0,lastTime=0,credit=0,lastPaint=0;
 let tab='inspect',selection=null,parents=[],focus=null,session=null,archive=null;
 const cache=new WeakMap();
+const bench=mountMolecularBench(by('molecular-bench'),{inspect(type,id){
+  activate('inspect');select(type,id);
+}});
+
 
 function markup(node,html) {
   if(cache.get(node)!==html){node.innerHTML=html;cache.set(node,html);}
@@ -192,6 +197,7 @@ function refresh() {
   if(tab==='inspect')renderInspector();
   if(tab==='environment')renderConditions(m);
   if(tab==='evidence')renderEvidence();
+  if(tab==='bench')bench.update(world);
   refreshView();
 }
 function pause() {running=false;pending=0;credit=0;lastTime=0;}
@@ -228,7 +234,8 @@ for(const button of document.querySelectorAll('[data-tab]')){
   button.addEventListener('click',()=>activate(button.dataset.tab));
   button.addEventListener('keydown',e=>{
     const buttons=[...document.querySelectorAll('[data-tab]')],k=buttons.indexOf(button);
-    const next={ArrowRight:(k+1)%3,ArrowLeft:(k+2)%3,Home:0,End:2}[e.key];
+    const size=buttons.length;
+    const next={ArrowRight:(k+1)%size,ArrowLeft:(k+size-1)%size,Home:0,End:size-1}[e.key];
     if(next!==undefined){e.preventDefault();activate(buttons[next].dataset.tab);buttons[next].focus();}
   });
 }
