@@ -1,0 +1,9 @@
+services:
+  genesis:
+    build: .
+    restart: "no"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
