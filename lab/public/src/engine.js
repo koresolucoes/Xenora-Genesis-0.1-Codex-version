@@ -1,9 +1,13 @@
-// Xenora's closed material cycle uses arbitrary units of matter and energy.
-// Visible grains, organism biomass and detritus account for all reactive matter.
+import { Environment } from "./environment.js";
+
+// Reactive matter occupies five compartments. A nutrient pulse is the only
+// external material input; absorbed light contributes to the separate energy budget.
 const TAU = 2 * Math.PI;
-const SNAPSHOT_VERSION = 1;
+const SNAPSHOT_VERSION = 2;
 const EVENT_LIMIT = 100;
 const LIGHT_CELLS = 16;
+const TELEMETRY_INTERVAL = 10;
+const TELEMETRY_LIMIT = 512;
 
 function clamp(value, low, high) {
   return Math.max(low, Math.min(high, value));
@@ -58,8 +62,8 @@ function validOrganism(org, nextId) {
     Number.isFinite(org.passiveDistance) && org.passiveDistance >= 0;
 }
 
-function validCheckpoint(state) {
-  if (!record(state) || state.version !== SNAPSHOT_VERSION || !validPosition(state.light) ||
+function validCheckpoint(state, dissolvedMass) {
+  if (!record(state) || ![1, SNAPSHOT_VERSION].includes(state.version) || !validPosition(state.light) ||
     !integer(state.seed, 0, 0xffffffff) || !integer(state.rng, 1, 0xffffffff) ||
     !integer(state.tick) || !integer(state.nextId, 1) ||
     !["initialPopulation", "births", "deaths"].every(key => integer(state[key])) ||
@@ -71,6 +75,8 @@ function validCheckpoint(state) {
   if (state.initialMass <= 0 || state.initialMass > 217 || state.initialPopulation !== 24 ||
     state.organisms.length !== state.initialPopulation + state.births - state.deaths ||
     state.events.length > EVENT_LIMIT) return false;
+  const input = state.version === 1 ? 0 : state.nutrientInputTotal;
+  if (!inRange(input, 0, Number.MAX_SAFE_INTEGER)) return false;
   const ids = new Set();
   for (const group of ["organisms", "grains", "minerals", "detritus"]) {
     for (const obj of state[group]) {
@@ -79,7 +85,7 @@ function validCheckpoint(state) {
         !inRange(obj.x, obj.radius, 1 - obj.radius) || !inRange(obj.y, obj.radius, 1 - obj.radius)) return false;
       ids.add(obj.id);
       if (group === "minerals") continue;
-      if (!inRange(obj.mass, Number.EPSILON, state.initialMass) ||
+      if (!inRange(obj.mass, Number.EPSILON, state.initialMass + input) ||
         Math.abs(obj.radius - (group === "organisms" ? bodyRadius(obj.mass) : grainRadius(obj.mass))) > 1e-10) return false;
       if (group === "organisms" && !validOrganism(obj, state.nextId)) return false;
       if (group === "detritus" && !integer(obj.decayAt, state.tick + 1)) return false;
@@ -88,16 +94,18 @@ function validCheckpoint(state) {
   let prevTick = 0;
   for (const event of state.events) {
     if (!record(event) || !integer(event.tick, prevTick, state.tick) || typeof event.text !== "string" ||
-      !["start", "birth", "death", "light"].includes(event.type)) return false;
+      !["start", "birth", "death", "light", "nutrient"].includes(event.type)) return false;
     prevTick = event.tick;
     if (event.type === "light" && !validPosition(event)) return false;
+    if (event.type === "nutrient" && (state.version === 1 || !validPosition(event) ||
+        !Number.isFinite(event.amount) || !(event.amount > 0 && event.amount <= input))) return false;
     if ((event.type === "birth" || event.type === "death") && !integer(event.id, 1, state.nextId - 1)) return false;
     if (event.type === "birth" && !integer(event.parent, 1, event.id - 1)) return false;
   }
-  const mass = total(state.organisms, "mass") + total(state.grains, "mass") + total(state.detritus, "mass");
+  const mass = total(state.organisms, "mass") + total(state.grains, "mass") + total(state.detritus, "mass") + dissolvedMass;
   const stored = total(state.organisms, "energy");
   const expected = state.initialEnergy + state.absorbedEnergy - state.dissipatedEnergy;
-  return Math.abs(mass - state.initialMass) <= 1e-8 * Math.max(1, state.initialMass) &&
+  return Math.abs(mass - state.initialMass - input) <= 1e-8 * Math.max(1, state.initialMass + input) &&
     Math.abs(stored - expected) <= 1e-8 * Math.max(1, state.absorbedEnergy, state.initialEnergy);
 }
 
@@ -119,6 +127,8 @@ export class World {
     this.passiveDistance = 0;
     this.absorbedEnergy = 0;
     this.dissipatedEnergy = 0;
+    this.nutrientInputTotal = 0;
+    this.telemetry = [];
 
     const rocks = [[0.15, 0.23, 0.026], [0.22, 0.76, 0.037], [0.52, 0.28, 0.032],
       [0.52, 0.71, 0.037], [0.84, 0.25, 0.024], [0.84, 0.71, 0.031], [0.68, 0.48, 0.018]];
@@ -126,6 +136,7 @@ export class World {
       this.minerals.push({ id: this.nextId++, x: x + this.noise(0.025),
         y: y + this.noise(0.025), radius, phase: this.random() * TAU });
     }
+    this.environment = new Environment({ size: 24, minerals: this.minerals });
 
     for (let i = 0; i < 130; i++) {
       const [x, y] = this.findStart(0.007);
@@ -146,6 +157,7 @@ export class World {
     this.initialMass = total(this.grains, "mass") + total(this.organisms, "mass");
     this.initialEnergy = total(this.organisms, "energy");
     this.log("start", "A lagoa foi povoada com " + this.initialPopulation + " organismos.");
+    this.recordTelemetry();
   }
 
   random() {
@@ -191,12 +203,29 @@ export class World {
     if (next.x === this.light.x && next.y === this.light.y) return;
     this.light = next;
     this.log("light", "O foco de luz foi reposicionado.", next);
+    if (this.telemetry.at(-1)?.tick === this.tick) this.recordTelemetry();
   }
 
-  lightAt(x, y) {
+  addNutrientPulse(x, y, amount = 1) {
+    const next = this.nutrientInputTotal + amount;
+    if (!inRange(x, 0, 1) || !inRange(y, 0, 1) || !inRange(amount, 0, Number.MAX_SAFE_INTEGER) ||
+        next > Number.MAX_SAFE_INTEGER) throw new Error("Pulso de nutriente inválido.");
+    if (!amount || next === this.nutrientInputTotal) return 0;
+    this.environment.add("nutrient", x, y, amount);
+    this.nutrientInputTotal = next;
+    this.log("nutrient", "Pulso externo de " + amount + " unidade(s) de nutriente.", { x, y, amount });
+    if (this.telemetry.at(-1)?.tick === this.tick) this.recordTelemetry();
+    return amount;
+  }
+
+  incidentLightAt(x, y) {
     const dx = x - this.light.x;
     const dy = y - this.light.y;
     return Math.exp(-(dx * dx + dy * dy) / 0.055);
+  }
+
+  lightAt(x, y) {
+    return this.incidentLightAt(x, y) * this.environment.transmissionAt(x, y);
   }
 
   addGrain(x, y, mass) {
@@ -210,10 +239,10 @@ export class World {
   }
 
   drift(entity, mobility, bodies = null) {
-    // A bounded, slow circulation field drives passive motion; organisms also propel themselves.
-    const t = this.tick * 0.003;
-    const dx = mobility * (0.00052 * Math.sin(7 * entity.y + t) + this.noise(0.00035));
-    const dy = mobility * (0.00048 * Math.cos(7 * entity.x - t) + this.noise(0.00035));
+    // The Eulerian solutes and Lagrangian particles use the same prescribed flow.
+    const flow = this.environment.flowAt(entity.x, entity.y);
+    const dx = mobility * (flow.x + this.noise(0.00035));
+    const dy = mobility * (flow.y + this.noise(0.00035));
     if (!this.free(entity.x + dx, entity.y + dy, entity.radius, bodies, entity)) return 0;
     entity.x += dx;
     entity.y += dy;
@@ -234,9 +263,12 @@ export class World {
     for (const [patch, occupants] of patches) {
       const x = (patch % LIGHT_CELLS + 0.5) / LIGHT_CELLS;
       const y = (Math.floor(patch / LIGHT_CELLS) + 0.5) / LIGHT_CELLS;
-      const intensity = this.lightAt(x, y);
+      const intensity = this.incidentLightAt(x, y);
       const share = Math.min(0.053 * intensity, 0.11 * intensity / occupants.length);
-      for (const org of occupants) incoming.set(org.id, Math.min(share, 9 - org.energy));
+      for (const org of occupants) {
+        const transmitted = share * this.environment.transmissionAt(org.x, org.y);
+        incoming.set(org.id, Math.min(transmitted, 9 - org.energy));
+      }
     }
     return incoming;
   }
@@ -265,6 +297,45 @@ export class World {
     org.radius = nextRadius;
     this.addDetritus(g.x, g.y, waste);
     org.cooldown = 28;
+  }
+
+  absorbNutrient(org) {
+    // The finite volume, not its interpolated display concentration, pays
+    // the entire uptake. The non-assimilated fraction returns as dissolved waste.
+    const yieldFraction = 0.82;
+    const energyPerMass = 0.12;
+    const capacity = Math.max(0, (6.4 - org.mass) / yieldFraction);
+    const demand = Math.min(0.026, capacity, org.energy / energyPerMass);
+    const uptake = this.environment.take("nutrient", org.x, org.y, demand);
+    if (uptake === 0) return 0;
+    const biomass = yieldFraction * uptake;
+    const radius = bodyRadius(org.mass + biomass);
+    if (!this.free(org.x, org.y, radius, this.organisms, org)) {
+      this.environment.add("nutrient", org.x, org.y, uptake);
+      return 0;
+    }
+    const cost = Math.min(org.energy, uptake * energyPerMass);
+    org.energy -= cost;
+    this.dissipatedEnergy += cost;
+    org.mass += biomass;
+    org.radius = radius;
+    this.environment.add("waste", org.x, org.y, uptake - biomass);
+    return uptake;
+  }
+
+  erodeGrains() {
+    const remaining = [];
+    for (const g of this.grains) {
+      this.drift(g, 1);
+      const eroded = Math.min(g.mass, 0.0005 + 0.0025 * g.mass);
+      this.environment.add("nutrient", g.x, g.y, eroded);
+      g.mass -= eroded;
+      if (g.mass > 0) {
+        g.radius = grainRadius(g.mass);
+        remaining.push(g);
+      }
+    }
+    this.grains = remaining;
   }
 
   moveOrganism(org) {
@@ -319,7 +390,7 @@ export class World {
 
   step() {
     this.tick++;
-    for (const g of this.grains) this.drift(g, 1);
+    this.erodeGrains();
     const remains = [];
     for (const d of this.detritus) {
       this.drift(d, 0.42);
@@ -327,15 +398,21 @@ export class World {
         remains.push(d);
         continue;
       }
-      const parts = Math.max(1, Math.ceil(d.mass / 0.95));
+      // Breaking a detrital particle exposes soluble waste to mineral recycling;
+      // its remaining insoluble material returns as edible and erodible grains.
+      const residue = d.mass * 0.60;
+      this.environment.add("waste", d.x, d.y, residue);
+      const solid = d.mass - residue;
+      const parts = Math.max(1, Math.ceil(solid / 0.95));
       for (let p = 0; p < parts; p++) {
         const x = d.x + this.noise(0.018);
         const y = d.y + this.noise(0.018);
-        const ok = this.free(x, y, grainRadius(d.mass / parts));
-        this.addGrain(ok ? x : d.x, ok ? y : d.y, d.mass / parts);
+        const ok = this.free(x, y, grainRadius(solid / parts));
+        this.addGrain(ok ? x : d.x, ok ? y : d.y, solid / parts);
       }
     }
     this.detritus = remains;
+    this.environment.step();
 
     const alive = [];
     const newborns = [];
@@ -361,12 +438,14 @@ export class World {
         this.log("death", "Organismo #" + org.id + " retornou ao detrito (" + cause + ").", { id: org.id });
         continue;
       }
+      this.absorbNutrient(org);
       this.tryFeed(org);
       alive.push(org);
     }
     this.organisms = alive;
     for (const org of alive) this.tryDivide(org, newborns);
     this.organisms = alive.concat(newborns);
+    if (this.tick % TELEMETRY_INTERVAL === 0) this.recordTelemetry();
     return this.tick;
   }
 
@@ -375,13 +454,17 @@ export class World {
     const grainMass = total(this.grains, "mass");
     const bodyMass = total(this.organisms, "mass");
     const detritusMass = total(this.detritus, "mass");
-    const totalMass = grainMass + bodyMass + detritusMass;
+    const water = this.environment.totals();
+    const totalMass = grainMass + bodyMass + detritusMass + water.total;
     const totalEnergy = total(this.organisms, "energy");
     let generation = 0;
     for (const org of this.organisms) generation = Math.max(generation, org.generation);
     return { tick: this.tick, population, generation, births: this.births, deaths: this.deaths,
       initialPopulation: this.initialPopulation, grainMass, bodyMass, detritusMass, totalMass,
-      initialMass: this.initialMass, massError: totalMass - this.initialMass, totalEnergy,
+      nutrientMass: water.nutrient, wasteMass: water.waste, meanTurbidity: water.meanTurbidity,
+      recycledLastTick: this.environment.lastRecycled, nutrientInputTotal: this.nutrientInputTotal,
+      maxGeneration: generation, initialEnergy: this.initialEnergy, initialMass: this.initialMass,
+      massError: totalMass - this.initialMass - this.nutrientInputTotal, totalEnergy,
       meanEnergy: population ? totalEnergy / population : 0,
       meanSensitivity: population ? total(this.organisms, "sensitivity") / population : 0,
       activeDistance: this.activeDistance, passiveDistance: this.passiveDistance,
@@ -390,17 +473,62 @@ export class World {
       energyError: totalEnergy + this.dissipatedEnergy - this.absorbedEnergy - this.initialEnergy };
   }
 
+  recordTelemetry() {
+    const sample = this.getMetrics();
+    if (this.telemetry.at(-1)?.tick === this.tick) this.telemetry[this.telemetry.length - 1] = sample;
+    else this.telemetry.push(sample);
+    if (this.telemetry.length > TELEMETRY_LIMIT) this.telemetry.shift();
+  }
+
   serialize() {
-    return copy({ version: SNAPSHOT_VERSION, ...this });
+    return copy({ version: SNAPSHOT_VERSION, ...this, environment: this.environment.serialize() });
   }
 
   static restore(snapshot) {
-    if (!validCheckpoint(snapshot)) throw new Error("Snapshot de lagoa incompatível.");
+    if (!record(snapshot) || ![1, SNAPSHOT_VERSION].includes(snapshot.version) ||
+        !Array.isArray(snapshot.minerals)) throw new Error("Snapshot de lagoa incompatível.");
+    // A v1 world already accounts for every unit in bodies, grains and detritus.
+    // Starting its water at zero preserves the material and energy at migration.
+    const migrated = snapshot.version === 1;
+    const environment = migrated ? new Environment({ minerals: snapshot.minerals }) :
+      Environment.restore(snapshot.environment, snapshot.minerals);
+    if (!validCheckpoint(snapshot, environment.totals().total) ||
+        (!migrated && (environment.tick !== snapshot.tick || !validTelemetry(snapshot))))
+      throw new Error("Snapshot de lagoa incompatível.");
     const state = copy(snapshot);
     const world = Object.create(World.prototype);
     for (const key of ["seed", "rng", "tick", "nextId", "light", "organisms", "grains", "minerals",
       "detritus", "events", "births", "deaths", "activeDistance", "passiveDistance", "absorbedEnergy",
       "dissipatedEnergy", "initialPopulation", "initialMass", "initialEnergy"]) world[key] = state[key];
+    world.environment = environment;
+    world.environment.tick = world.tick;
+    world.nutrientInputTotal = migrated ? 0 : state.nutrientInputTotal;
+    world.telemetry = migrated ? [] : state.telemetry;
+    if (migrated) world.recordTelemetry();
     return world;
   }
+}
+
+function validTelemetry(state) {
+  if (!Array.isArray(state.telemetry) || !state.telemetry.length || state.telemetry.length > TELEMETRY_LIMIT)
+    return false;
+  let prev = -1;
+  for (const sample of state.telemetry) {
+    if (!record(sample) || !integer(sample.tick, prev + 1, state.tick) ||
+        !["population", "births", "deaths"].every(key => integer(sample[key])) ||
+        !["grainMass", "bodyMass", "detritusMass", "nutrientMass", "wasteMass", "absorbedEnergy",
+          "dissipatedEnergy", "totalEnergy", "totalMass", "meanTurbidity", "nutrientInputTotal"]
+          .every(key => Number.isFinite(sample[key]) && sample[key] >= 0) ||
+        !Number.isFinite(sample.massError) || sample.initialMass !== state.initialMass ||
+        sample.nutrientInputTotal > state.nutrientInputTotal ||
+        sample.population !== state.initialPopulation + sample.births - sample.deaths)
+      return false;
+    const stocks = sample.grainMass + sample.bodyMass + sample.detritusMass + sample.nutrientMass + sample.wasteMass;
+    const expected = state.initialMass + sample.nutrientInputTotal;
+    const tolerance = 1e-8 * Math.max(1, expected);
+    if (Math.abs(stocks - sample.totalMass) > tolerance ||
+        Math.abs(sample.totalMass - expected - sample.massError) > tolerance) return false;
+    prev = sample.tick;
+  }
+  return state.tick - prev < TELEMETRY_INTERVAL;
 }

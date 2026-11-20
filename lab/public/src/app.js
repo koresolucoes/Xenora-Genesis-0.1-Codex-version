@@ -1,9 +1,11 @@
 import { World } from './engine.js';
 import { LagoonView } from './render.js';
+import { ScienceDashboard } from './dashboard.js';
 
 const byId = id => document.getElementById(id);
 const canvas = byId('lagoon');
 const view = new LagoonView(canvas);
+const dashboard = new ScienceDashboard(byId('dashboard'));
 const seedInput = byId('seed-input');
 const keyInput = byId('cloud-key');
 const speedLevels = [0.5, 1, 2];
@@ -23,8 +25,13 @@ let selected = firstSelection(world);
 let running = true;
 let speedIndex = 1;
 let showLight = true;
-let movingLight = false;
+let tool = 'inspect';
+let layer = 'natural';
+let waterProbe = null;
+let cursor = { x: 0.5, y: 0.5 };
 let lastFrame = null;
+let lastWaterPaint = -Infinity;
+const visualFrameMs = 1000 / 15;
 let elapsed = 0;
 let dirty = true;
 let renderedLog = null;
@@ -82,11 +89,11 @@ function updateControls() {
   if (byId('speed-label')) setText('speed-label', speedText);
   else setText('speed', speedText);
   byId('speed').setAttribute('aria-label', 'Velocidade ' + speedText + '. Alterar velocidade');
-  byId('move-light').setAttribute('aria-pressed', String(movingLight));
+  byId('move-light').setAttribute('aria-pressed', String(tool === 'light'));
   byId('light-layer').setAttribute('aria-pressed', String(showLight));
   byId('light-layer').classList.toggle('active', showLight);
-  canvas.classList.toggle('placing-light', movingLight);
-  canvas.style.cursor = movingLight ? 'crosshair' : '';
+  byId('pulse').setAttribute('aria-pressed', String(tool === 'pulse'));
+  canvas.style.cursor = tool === 'inspect' ? '' : 'crosshair';
 }
 
 function pauseOrPlay(next) {
@@ -96,8 +103,9 @@ function pauseOrPlay(next) {
   updateControls();
 }
 
-function selectEntity(next) {
+function selectEntity(next, point = null) {
   selected = next;
+  waterProbe = next ? null : point;
   dirty = true;
 }
 
@@ -105,7 +113,10 @@ function replaceWorld(next, play = false) {
   world = next;
   selected = firstSelection(next);
   seedInput.value = String(next.seed);
-  movingLight = false;
+  tool = 'inspect';
+  waterProbe = null;
+  dashboard.reset(world);
+  view.invalidate?.();
   renderedLog = null;
   dirty = true;
   pauseOrPlay(play);
@@ -131,7 +142,35 @@ function positionText(item) {
   return fixed.format(item.x * 100) + '%, ' + fixed.format(item.y * 100) + '%';
 }
 
+function waterReadings(point) {
+  const sample = world.environment.sample(point.x, point.y);
+  const flow = world.environment.flowAt(point.x, point.y);
+  return [
+    ['Nutriente', format.format(sample.nutrient) + ' u.m./área'],
+    ['Resíduo', format.format(sample.waste) + ' u.m./área'],
+    ['Luz disponível', format.format(world.lightAt(point.x, point.y) * 100) + '%'],
+    ['Transmissão da água', format.format(sample.transmission * 100) + '%'],
+    ['Corrente', new Intl.NumberFormat(locale, {maximumFractionDigits: 5}).format(Math.hypot(flow.x, flow.y)) + ' L/passo']
+  ];
+}
+
 function renderInspector() {
+  const reticle = byId('sample-reticle');
+  const target = tool !== 'inspect' ? cursor : waterProbe;
+  reticle.hidden = !target;
+  if (target) {
+    reticle.style.left = (target.x * 100) + '%';
+    reticle.style.top = (target.y * 100) + '%';
+  }
+  byId('specimen-canvas').hidden = Boolean(waterProbe);
+  byId('water-lens').hidden = !waterProbe;
+  if (waterProbe) {
+    setText('inspector-title', 'Coluna de água');
+    setText('inspector-kind', 'Sonda ambiental');
+    setText('water-coordinate', positionText(waterProbe));
+    kvRows(waterReadings(waterProbe));
+    return;
+  }
   const item = findSelected();
   if (!item) {
     setText('inspector-title', selected ? entityTypes[selected.type].name + ' ' + selected.id : 'Selecione uma entidade');
@@ -149,6 +188,8 @@ function renderInspector() {
       ['Reserva de energia', fixed.format(item.energy)],
       ['Massa estrutural', fixed.format(item.mass)],
       ['Sensibilidade', fixed.format(item.sensitivity)],
+      ['Luz local', format.format(world.lightAt(item.x, item.y) * 100) + '%'],
+      ['Nutriente local', format.format(world.environment.sample(item.x, item.y).nutrient) + ' u.m./área'],
       ['Idade', format.format(item.age) + ' passos'],
       ['Progenitor', item.parent == null ? 'Fundador' : '#' + item.parent]
     ];
@@ -187,6 +228,7 @@ function renderEvents() {
 }
 
 function renderPanels() {
+  dashboard.update(world);
   const metrics = world.getMetrics();
   setText('field-name', 'Lagoa ' + String(world.seed).padStart(3, '0'));
   setText('tick', String(metrics.tick).padStart(4, '0'));
@@ -202,19 +244,26 @@ function frame(now) {
     const interval = 1000 / (baseTicksPerSecond * speedLevels[speedIndex]);
     while (elapsed >= interval) {
       world.step();
+      dashboard.record(world);
       elapsed -= interval;
       dirty = true;
     }
   }
   lastFrame = now;
+  const repaintWater = dirty || (running && layer === 'natural' && now - lastWaterPaint >= visualFrameMs);
   if (dirty) {
     renderPanels();
-    view.draw(world, { selected, showLight, now });
     const specimen = byId('specimen-canvas');
-    if (specimen && typeof view.drawSpecimen === 'function') {
+    if (!waterProbe && specimen && typeof view.drawSpecimen === 'function') {
       view.drawSpecimen(specimen, world, selected, now);
     }
     dirty = false;
+  }
+  if (repaintWater) {
+    const rate = baseTicksPerSecond * speedLevels[speedIndex];
+    const renderTick = running ? world.tick + Math.min(1, elapsed * rate / 1000) : world.tick;
+    view.draw(world, {selected, showLight, now, layer, renderTick});
+    lastWaterPaint = now;
   }
   requestAnimationFrame(frame);
 }
@@ -223,6 +272,7 @@ byId('play').addEventListener('click', () => pauseOrPlay(!running));
 byId('step').addEventListener('click', () => {
   pauseOrPlay(false);
   world.step();
+  dashboard.record(world);
   dirty = true;
 });
 byId('speed').addEventListener('click', () => {
@@ -234,45 +284,76 @@ byId('light-layer').addEventListener('click', () => {
   showLight = !showLight;
   updateControls();
 });
-byId('move-light').addEventListener('click', () => {
-  movingLight = !movingLight;
-  updateControls();
-  if (movingLight) {
-    canvas.focus({ preventScroll: true });
-    announce('Clique na lagoa para mover a luz. Pelo teclado, use as setas e confirme com Enter.', 7500);
+const fieldKeys = {
+  nutrient: ['Nutriente · meia escala em 65 u.m./área', '#f0e7aa'],
+  waste: ['Resíduo · meia escala em 35 u.m./área', '#ed8299'],
+  flow: ['Velocidade · 0 a 0,00058 L/passo', '#81d8c8'],
+  light: ['Intensidade local · 0 a 100%', '#fff0bd']
+};
+byId('field-layer').addEventListener('change', event => {
+  layer = event.target.value;
+  const key = fieldKeys[layer];
+  const legend = byId('map-legend');
+  legend.hidden = !key;
+  if (key) {
+    legend.textContent = key[0];
+    legend.style.setProperty('--keycolor', key[1]);
   }
+  dirty = true;
 });
 
-function moveLight(x, y) {
-  world.setLight(Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)));
-  dirty = true;
+function armTool(next) {
+  tool = tool === next ? 'inspect' : next;
+  const item = findSelected();
+  const initial = tool === 'light' ? world.light : waterProbe || item || world.light;
+  cursor = {x:initial.x, y:initial.y};
+  updateControls();
+  if (tool !== 'inspect') {
+    canvas.focus({preventScroll:true});
+    const action = tool === 'light' ? 'mover a luz' : 'injetar 1 unidade de nutriente';
+    announce('Clique na água para ' + action + '. Teclado: setas e Enter.', 5500);
+  }
+}
+byId('move-light').addEventListener('click', () => armTool('light'));
+byId('pulse').addEventListener('click', () => armTool('pulse'));
+
+function applyTool(point) {
+  const {x, y} = point;
+  if (tool === 'light') {
+    world.setLight(x, y);
+    announce('Fonte de luz reposicionada.');
+  } else if (tool === 'pulse') {
+    world.addNutrientPulse(x, y, 1);
+    selectEntity(null, {x, y});
+    announce('1 unidade de nutriente adicionada. A sonda acompanha este ponto.');
+  }
+  view.invalidate?.();
+  dashboard.record(world);
+  tool = 'inspect';
+  updateControls();
 }
 
 canvas.addEventListener('click', event => {
-  if (movingLight) {
-    const point = view.coordinates(event.clientX, event.clientY);
-    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-    moveLight(point.x, point.y);
-    movingLight = false;
-    updateControls();
-    announce('Fonte de luz reposicionada.');
-    return;
-  }
-  selectEntity(view.pick(world, event.clientX, event.clientY) || null);
+  const point = view.coordinates(event.clientX, event.clientY);
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+  if (tool !== 'inspect') { applyTool(point); return; }
+  selectEntity(view.pick(world, event.clientX, event.clientY) || null, point);
 });
 
 canvas.tabIndex = 0;
 canvas.addEventListener('keydown', event => {
-  if (movingLight) {
-    const offset = { ArrowLeft: [-0.05, 0], ArrowRight: [0.05, 0], ArrowUp: [0, -0.05], ArrowDown: [0, 0.05] }[event.key];
-    if (offset) {
+  if (tool !== 'inspect') {
+    const delta = {ArrowLeft:[-0.04,0], ArrowRight:[0.04,0], ArrowUp:[0,-0.04], ArrowDown:[0,0.04]}[event.key];
+    if (delta) {
       event.preventDefault();
-      moveLight(world.light.x + offset[0], world.light.y + offset[1]);
-    } else if (event.key === 'Enter' || event.key === 'Escape') {
+      cursor = {x:Math.max(0,Math.min(1,cursor.x+delta[0])),y:Math.max(0,Math.min(1,cursor.y+delta[1]))};
+      dirty = true;
+    } else if (event.key === 'Enter') {
       event.preventDefault();
-      movingLight = false;
+      applyTool(cursor);
+    } else if (event.key === 'Escape') {
+      tool = 'inspect';
       updateControls();
-      announce('Posicionamento da luz encerrado.');
     }
     return;
   }
@@ -432,7 +513,7 @@ document.addEventListener('visibilitychange', () => { lastFrame = null; elapsed 
 const resize = new ResizeObserver(() => { dirty = true; });
 resize.observe(canvas);
 if (byId('specimen-canvas')) resize.observe(byId('specimen-canvas'));
-view.back?.addEventListener('load', () => { dirty = true; }, { once: true });
+dashboard.reset(world);
 seedInput.value = String(world.seed);
 byId('flash')?.setAttribute('role', 'status');
 updateControls();

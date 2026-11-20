@@ -64,6 +64,11 @@ async function readCheckpoint(request) {
 }
 
 function storageProvider(env) {
+  if (env.SUPABASE_PUBLISHABLE_KEY || env.XENORA_GATEWAY_TOKEN) {
+    const gatewayReady = env.SUPABASE_URL && env.SUPABASE_PUBLISHABLE_KEY
+      && /^[0-9a-f]{64}$/.test(env.XENORA_GATEWAY_TOKEN || "");
+    return gatewayReady ? "supabase" : null;
+  }
   if (env.SUPABASE_URL || env.SUPABASE_SERVICE_ROLE_KEY) {
     return env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY ? "supabase" : null;
   }
@@ -71,10 +76,12 @@ function storageProvider(env) {
 }
 
 async function supabaseRpc(env, name, params) {
-  const url = new URL("/rest/v1/rpc/" + name, env.SUPABASE_URL);
+  const key = env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
+  const rpcName = env.SUPABASE_PUBLISHABLE_KEY ? "xenora_gateway_" + name : "xenora_" + name;
+  const url = new URL("/rest/v1/rpc/" + rpcName, env.SUPABASE_URL);
   if (url.protocol !== "https:") throw new Error("Supabase requer HTTPS");
-  const key = env.SUPABASE_SERVICE_ROLE_KEY;
   const headers = { apikey: key, "Content-Type": "application/json" };
+  if (env.SUPABASE_PUBLISHABLE_KEY) headers["X-Xenora-Gateway"] = env.XENORA_GATEWAY_TOKEN;
   if (key.startsWith("eyJ")) headers.Authorization = "Bearer " + key;
   const response = await fetch(url, {
     method: "POST",
@@ -88,7 +95,7 @@ async function supabaseRpc(env, name, params) {
 
 async function saveCheckpoint(env, provider, id, digest, checkpoint) {
   if (provider === "supabase") {
-    await supabaseRpc(env, "xenora_create_checkpoint", {
+    await supabaseRpc(env, "create_checkpoint", {
       p_id: id, p_hash: digest, p_checkpoint: JSON.parse(checkpoint)
     });
     return;
@@ -102,7 +109,7 @@ async function saveCheckpoint(env, provider, id, digest, checkpoint) {
 
 async function loadCheckpoint(env, provider, id, digest) {
   if (provider === "supabase") {
-    const response = await supabaseRpc(env, "xenora_read_checkpoint", { p_id: id, p_hash: digest });
+    const response = await supabaseRpc(env, "read_checkpoint", { p_id: id, p_hash: digest });
     return response.status === 204 ? null : response.json();
   }
   const sql = neon(env.DATABASE_URL);

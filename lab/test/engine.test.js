@@ -29,8 +29,8 @@ test("reactive matter is conserved through feeding, reproduction and death", () 
   const initialMass = world.getMetrics().totalMass;
   for (let interval = 0; interval < 25; interval++) {
     advance(world, 50);
-    const { grainMass, bodyMass, detritusMass } = world.getMetrics();
-    assert.ok(Math.abs(grainMass + bodyMass + detritusMass - initialMass) < 1e-8);
+    const { grainMass, bodyMass, detritusMass, nutrientMass, wasteMass } = world.getMetrics();
+    assert.ok(Math.abs(grainMass + bodyMass + detritusMass + nutrientMass + wasteMass - initialMass) < 1e-8);
   }
   assert.ok(world.births > 0);
   assert.ok(world.deaths > 0);

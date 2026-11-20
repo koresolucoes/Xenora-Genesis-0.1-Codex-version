@@ -1,3 +1,5 @@
+import { LivingWater } from './living-water.js'
+
 const TAU = Math.PI * 2
 const groups = { organism: 'organisms', grain: 'grains', mineral: 'minerals', detritus: 'detritus' }
 const paintOrder = ['mineral', 'detritus', 'grain', 'organism']
@@ -308,63 +310,6 @@ function paintEntity(ctx, type, ent, x, y, radius, tick = 0) {
   ctx.restore()
 }
 
-function cover(ctx, image, w, h) {
-  const scale = Math.max(w / image.width, h / image.height)
-  const dw = image.width * scale, dh = image.height * scale
-  ctx.drawImage(image, (w - dw) / 2, (h - dh) / 2, dw, dh)
-}
-
-function fallbackBackdrop() {
-  const c = makeCanvas(1200, 750), ctx = c.getContext('2d'), rng = random(231)
-  const w = c.width, h = c.height
-  const wash = ctx.createLinearGradient(0, 0, w * 0.6, h)
-  wash.addColorStop(0, '#253e3c'); wash.addColorStop(0.32, '#294e4a')
-  wash.addColorStop(0.6, '#173d3e'); wash.addColorStop(1, '#102b30')
-  ctx.fillStyle = wash; ctx.fillRect(0, 0, w, h)
-  for (let i = 0; i < 210; i++) {
-    const x = rng() * w, y = rng() * h, r = 9 + rng() ** 3 * 130
-    const ink = i % 3 ? 'rgba(21,35,40,.33)' : 'rgba(135,167,133,.19)'
-    const mist = gradient(ctx, x, y, r, [[0, ink], [1, 'rgba(30,65,60,0)']])
-    ctx.fillStyle = mist; ctx.fillRect(x-r, y-r, 2*r,2*r)
-  }
-  // Broken wavelets suggest refracted sunlight even with no photographic background.
-  for (let i = 0; i < 185; i++) {
-    const x = rng()*w, y = rng()*h
-    const length = 8 + rng()**2 * 78
-    ctx.beginPath()
-    ctx.moveTo(x, y)
-    ctx.bezierCurveTo(x+length*0.38,y-length*0.14,x+length*0.55,y+length*0.08,x+length,y-length*0.3)
-    ctx.strokeStyle = 'rgba(166,199,161,'+(0.018+rng()*0.10)+')'
-    ctx.lineWidth = 0.5+rng()*1.35
-    ctx.stroke()
-  }
-  for (let i = 0; i < 4400; i++) {
-    const x = rng() * w, y = rng() * h, r = 0.3 + rng() ** 3 * 2.3
-    ellipse(ctx,x,y,r,r*0.56,i % 3 ? 'rgba(165,183,150,.12)' : 'rgba(8,24,29,.32)',rng()*Math.PI)
-  }
-  for (let i = 0; i < 112; i++) {
-    const x = rng() * w, y = rng() * h
-    if (Math.min(x / w, 1 - x/w, y/h, 1-y/h) > rng() ** 3 * 0.18) continue
-    const r = 9 + rng() ** 2 * 90
-    const pts = Array.from({length:9}, (_,j) => {
-      const a = TAU * j / 9, k = r * (0.70 + rng() * 0.35)
-      return [x + Math.cos(a)*k, y + Math.sin(a)*k*0.62]
-    })
-    const lit = ctx.createLinearGradient(x - r*0.4,y-r*0.5,x+r*0.3,y+r*0.5)
-    lit.addColorStop(0,'#3e5650'); lit.addColorStop(0.37,'#304640'); lit.addColorStop(1,'#192e2c')
-    polygon(ctx,pts,lit,'rgba(19,35,34,.85)',1.5)
-  }
-  return c
-}
-
-let fallback = null
-
-function drawLight(ctx, x, y, w, h) {
-  const r = Math.max(w, h) * 0.40
-  const glow = gradient(ctx, x, y, r, [[0,'rgba(221,224,143,.21)'],[0.30,'rgba(193,210,137,.14)'],[0.65,'rgba(128,181,145,.065)'],[1,'rgba(125,177,149,0)']])
-  ctx.fillStyle = glow; ctx.fillRect(x-r, y-r, 2*r, 2*r)
-}
-
 function markSelection(ctx, x, y, radius) {
   const r = radius + Math.max(4,radius * 0.28)
   ctx.save()
@@ -385,13 +330,29 @@ function selectedEntity(world, sel) {
 export class LagoonView {
   constructor(canvas) {
     this.canvas = canvas
-    this.back = new Image()
-    this.back.src = new URL('../assets/lagoon.jpg', import.meta.url).href
+    this.water = new LivingWater()
+    this.zoom = 1
+    this.center = { x: 0.5, y: 0.5 }
+  }
+
+  setZoom(value, center = this.center) {
+    const factor = clamp(Number(value) || 1, 1, 3)
+    const half = 0.5 / factor
+    this.zoom = factor
+    this.center = { x: clamp(center?.x ?? 0.5, half, 1 - half), y: clamp(center?.y ?? 0.5, half, 1 - half) }
+  }
+
+  invalidate() {
+    this.lastFrame = null
+    this.water.frame = null
   }
 
   coordinates(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect()
-    return { x: clamp((clientX - rect.left) / (rect.width || 1), 0, 1), y: clamp((clientY - rect.top) / (rect.height || 1), 0, 1) }
+    return {
+      x: clamp(this.center.x + ((clientX - rect.left) / (rect.width || 1) - 0.5) / this.zoom, 0, 1),
+      y: clamp(this.center.y + ((clientY - rect.top) / (rect.height || 1) - 0.5) / this.zoom, 0, 1)
+    }
   }
 
   pick(world, clientX, clientY) {
@@ -412,27 +373,39 @@ export class LagoonView {
     return best
   }
 
-  draw(world, { selected = null, showLight = true } = {}) {
+  draw(world, { selected = null, showLight = true, layer = 'natural', zoom, renderTick = world.tick } = {}) {
     const { ctx, w, h } = dimensions(this.canvas)
-    const frame = [world.tick, selected?.type, selected?.id, showLight, world.light?.x, world.light?.y,
-      this.canvas.width, this.canvas.height, this.back.naturalWidth].join('|')
-    if (this.lastWorld === world && this.lastFrame === frame) return
+    const ent = selectedEntity(world, selected)
+    const sample = selected?.type === 'water' ? selected : null
+    if (zoom !== undefined && zoom !== this.zoom) this.setZoom(zoom, ent || sample || this.center)
+    const env = world.environment
+    // Cap optical states to four per model tick. Numbers/chemistry stay at record time.
+    const opticalTick = layer === 'natural' && Number.isFinite(renderTick)
+      ? Math.floor(clamp(renderTick, world.tick, world.tick + 1) * 4) / 4 : world.tick
+    const frame = [world.tick, opticalTick, selected?.type, selected?.id, sample?.x, sample?.y, showLight, layer,
+      world.light?.x, world.light?.y, this.zoom, this.center.x, this.center.y,
+      this.canvas.width, this.canvas.height, env?.revision].join('|')
+    if (this.lastWorld === world && this.lastFrame === frame && env?.nutrient === this.nutrient && env?.waste === this.waste) return
     this.lastWorld = world
     this.lastFrame = frame
+    this.nutrient = env?.nutrient
+    this.waste = env?.waste
+    ctx.save()
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
-    if (this.back.complete && this.back.naturalWidth) cover(ctx,this.back,w,h)
-    else { fallback ||= fallbackBackdrop(); cover(ctx, fallback, w, h) }
-
-    if (showLight && world.light) drawLight(ctx, world.light.x * w, world.light.y * h, w, h)
+    ctx.translate(w / 2, h / 2)
+    ctx.scale(this.zoom, this.zoom)
+    ctx.translate(-this.center.x * w, -this.center.y * h)
+    this.water.draw(ctx, world, w, h, layer, showLight, this.zoom, opticalTick)
     for (const type of paintOrder) {
-      for (const ent of world[groups[type]] || []) {
-        const radius = sizeFor(type, ent, w, h), x = ent.x * w, y = ent.y * h
-        paintEntity(ctx, type, ent, x, y, radius, world.tick)
+      for (const body of world[groups[type]] || []) {
+        const radius = sizeFor(type, body, w, h), x = body.x * w, y = body.y * h
+        paintEntity(ctx, type, body, x, y, radius, world.tick)
       }
     }
-    const ent = selectedEntity(world, selected)
     if (ent) markSelection(ctx, ent.x*w, ent.y*h, sizeFor(selected.type,ent,w,h))
+    else if (sample && Number.isFinite(sample.x) && Number.isFinite(sample.y)) markSelection(ctx,sample.x*w,sample.y*h,4/this.zoom)
+    ctx.restore()
   }
 
   drawSpecimen(canvas, world, selected, now) {
