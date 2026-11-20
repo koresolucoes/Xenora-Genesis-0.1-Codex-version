@@ -29,7 +29,7 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
     <label>Chave de recuperação<input type="password" data-key spellcheck="false" autocomplete="off" placeholder="Identificador e código do mundo"></label>
     <div class="wa-actions"><button type="button" data-act="open">Abrir mundo</button><button type="button" data-act="copy">Copiar chave</button></div>
     <div class="wa-history" data-history hidden>
-    <label>Ramo<select data-runs></select></label><label>Revisão<select data-revisions></select></label>
+    <label>Ramo<select data-runs></select></label><p data-run-origin class="wa-current"></p><label>Revisão<select data-revisions></select></label>
     <div class="wa-actions"><button type="button" data-act="more" hidden>Mais revisões</button><button type="button" data-act="load">Restaurar revisão</button>
     <button type="button" data-act="fork">Bifurcar esta revisão</button></div>
     <label>Registros desta revisão<select data-view><option value="events">Acontecimentos</option>
@@ -122,6 +122,15 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
   async function showRevisions(start=0) {
     clearRows();
     const runId=runSelect.value;
+    const active=knownRuns.find(row=>row.runId===runId);
+    const parent=knownRuns.find(row=>row.runId===active?.parentRunId);
+    const origin=q('[data-run-origin]');
+    if (active?.parentRunId) {
+      const source=parent?.label || 'Ramo '+active.parentRunId.slice(0,8);
+      origin.textContent='Ramo de '+source+' · revisão de origem '+active.parentRevision+'.';
+    } else if (active) {
+      origin.textContent='Primeira execução registrada neste mundo.';
+    } else { origin.textContent=''; }
     const result=await listRevisions(browse,runId,start);
     if (!start) revSelect.replaceChildren();
     for (const row of result.revisions) {
@@ -255,7 +264,15 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
     if (!attached) return null;
     return {worldId:attached.worldId, runId:attached.runId, revision:attached.revision, tick:archivedTick};
   }
-  return {detach, getRemoteReference, forkWith(transform,label) {
+  function getRunOrigin() {
+    if (!attached) return null;
+    const run=knownRuns.find(row=>row.runId===attached.runId);
+    if (!run) return null;
+    if (!run.parentRunId) return 'Execução inicial deste mundo no arquivo.';
+    const parent=knownRuns.find(row=>row.runId===run.parentRunId);
+    return 'Ramo aberto da revisão '+run.parentRevision+' de '+(parent?.label || 'ramo '+run.parentRunId.slice(0,8))+'.';
+  }
+  return {detach, getRemoteReference, getRunOrigin, forkWith(transform,label) {
     return execute(async()=>{
       if (pending) throw new Error('Conclua o envio pendente antes de bifurcar.');
       const base=getSnapshot(), changed=transform(base);

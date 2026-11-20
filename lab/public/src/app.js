@@ -1,3 +1,4 @@
+import {rememberInstrument} from "./instrument-route.js";
 import { getSurfaceTransfer } from './surface-link.js';
 import { mountWorldArchive } from './world-archive.js';
 import { World } from './engine.js';
@@ -565,6 +566,7 @@ try {
   if (transfer) {
     replaceWorld(World.fromSurfaceSample(transfer.sample), false);
     const originLink = document.querySelector('.origin-nav');
+    originLink.hidden = false;
     originLink.href = './primordial.html?origem=' + encodeURIComponent(transfer.id);
     originLink.textContent = 'Voltar à origem';
     announce('Uma célula virtual foi introduzida nesta amostra de superfície.', 6500);
@@ -576,3 +578,4 @@ byId('flash')?.setAttribute('role', 'status');
 updateControls();
 checkCloud();
 requestAnimationFrame(frame);
+rememberInstrument(()=>world.serialize(), s=>replaceWorld(World.restore(s),false));

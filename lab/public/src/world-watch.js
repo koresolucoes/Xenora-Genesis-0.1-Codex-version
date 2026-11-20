@@ -19,6 +19,66 @@ function action(label, intent, id) {
   return btn;
 }
 
+function edgeDescription(edge, parentName) {
+  const step='Passo '+integer.format(edge.tick)+' de '+parentName+' · ';
+  switch(edge.action) {
+    case 'control': return step+'luz mantida em '+decimal.format(edge.to)+'×';
+    case 'light': return step+'luz de '+decimal.format(edge.from)+'× para '+decimal.format(edge.to)+'×';
+    case 'open': return step+'cópia aberta no mapa';
+    case 'fork': return step+'bifurcação com as condições de origem';
+    case 'capture': return step+'cópia do estado do mapa';
+    default: return step+'intervenção não registrada';
+  }
+}
+
+function drawRelations(list,panel,relations) {
+  const children=new Map(), roots=[];
+  for(const node of relations.values()) {
+    if(!node.parent)roots.push(node);
+    else {
+      if(!children.has(node.parent.id))children.set(node.parent.id,[]);
+      children.get(node.parent.id).push(node);
+    }
+  }
+  const lines=document.createDocumentFragment();
+  const stack=roots.reverse().map(node=>({node,depth:0}));
+  while(stack.length) {
+    const {node,depth}=stack.pop();
+    const current=node.id===panel.focusId, card=panel.entries.get(node.id);
+    const row=element('li','ww-node');
+    row.dataset.wwNode=node.id;
+    if(node.parent)row.dataset.wwParent=node.parent.id;
+    if(current)row.setAttribute('aria-current','true');
+    row.style.setProperty('--ww-level',Math.min(depth,4));
+    const label=card ? action(node.name,'open',node.id) : element('strong','ww-node-name',node.name);
+    if(card) {
+      label.classList.add('ww-node-link');
+      label.setAttribute('aria-label','Abrir '+node.name+' no mapa');
+    }
+    const title=element('div','ww-node-title');
+    title.append(label);
+    if(current)title.append(element('span','ww-focus-label','Foco atual do mapa'));
+    else if(!card)title.append(element('span','ww-node-role',node.kind==='map'?'Mapa anterior':
+      node.kind==='reference'?'Origem referenciada':'Cartão retirado'));
+    row.append(title);
+    let detail;
+    if(node.parent)detail=edgeDescription(node.parent,relations.get(node.parent.id).name);
+    else if(node.kind==='seed')detail='Mundo independente';
+    else if(node.kind==='map')detail='Mundo de origem do mapa';
+    else detail='Sem origem anterior registrada';
+    if(!node.parent && Number.isInteger(node.seed))detail+=' · semente '+node.seed;
+    row.append(element('span','ww-node-description',detail));
+    if(node.lightChange){
+      const change=node.lightChange;
+      row.append(element('span','ww-node-description','Última alteração de luz no passo '+integer.format(change.tick)+
+        ' · '+decimal.format(change.from)+'× para '+decimal.format(change.to)+'×'));
+    }
+    lines.append(row);
+    for(const child of [...(children.get(node.id) || [])].reverse())stack.push({node:child,depth:depth+1});
+  }
+  list.replaceChildren(lines);
+}
+
 function makeCard(id) {
   const card = element('article','ww-card');
   card.dataset.worldWatchCard = id;
@@ -48,9 +108,10 @@ function makeCard(id) {
 }
 
 export function mountWorldWatch(root, {getWorld, openWorld, getRemoteReference = () => null, storeFactory = openWatchStore}) {
-  if (!root) return {refresh(){},clearFocus(){},destroy(){}};
+  if (!root) return {refresh(){},clearFocus(){},getFocusLabel(){return null;},destroy(){}};
   root.classList.add('ww-panel');
-  root.innerHTML = `<header class="ww-header"><div><h2>Mundos acompanhados</h2><p>Cada cartão roda uma cópia local. Compare até quatro execuções e abra qualquer uma no mapa principal.</p></div><span class="ww-count" data-ww="count"></span></header>
+  root.innerHTML = `<header class="ww-header"><div><h2>Origens e ramos</h2><p>Selecione o nome de uma execução acompanhada para abrir uma cópia no mapa.</p></div><span class="ww-count" data-ww="count"></span></header>
+    <ol class="ww-tree" data-ww="tree" aria-label="Relações entre mundos e foco atual"></ol>
     <div class="ww-setup"><label>Nome do mundo ou ramo<input data-ww="name" type="text" maxlength="56" placeholder="Ex. Lagoa de referência"></label>
       <label>Semente<input data-ww="seed" type="number" min="0" max="4294967295" step="1" value="42"></label>
       <div class="ww-actions" data-ww="add"></div></div>
@@ -71,6 +132,7 @@ export function mountWorldWatch(root, {getWorld, openWorld, getRemoteReference =
   let panel = new WorldWatch(), store = null, ready = false, destroyed = false;
   let dirty = false, saving = null, saveTimer = null, timer = null, pendingRounds = 0;
   let unsavedRecoverable = false;
+  let treeSignature='';
   const announce = text => { notice.textContent = text; };
 
   function draw() {
@@ -82,6 +144,12 @@ export function mountWorldWatch(root, {getWorld, openWorld, getRemoteReference =
     go.disabled = stop.disabled = batch.disabled = !ready || count === 0;
     undo.hidden = !panel.removed;
     undo.disabled = count >= WATCH_LIMIT;
+    const relations=panel.relations();
+    const signature=JSON.stringify([[...relations.values()],[...panel.entries.keys()],panel.focusId]);
+    if(treeSignature!==signature) {
+      drawRelations(find('tree'),panel,relations);
+      treeSignature=signature;
+    }
     for (const [id, view] of nodes) {
       if (!panel.entries.has(id)) { view.card.remove(); nodes.delete(id); }
     }
@@ -89,14 +157,12 @@ export function mountWorldWatch(root, {getWorld, openWorld, getRemoteReference =
       let view = nodes.get(entry.id);
       if (!view) { view = makeCard(entry.id); nodes.set(entry.id,view); grid.append(view.card); }
       const world = entry.world, m = world.getMetrics();
-      const focussed = panel.focusId === entry.id;
+      const focussed = panel.node(panel.focusId)?.parent?.id===entry.id;
       view.card.classList.toggle('ww-focused',focussed);
       view.title.textContent = entry.name;
       view.status.textContent = entry.playing ? 'Rodando' : 'Em pausa';
       view.status.classList.toggle('ww-running',entry.playing);
-      const parentName = panel.entries.get(entry.parent?.id)?.name || entry.parent?.name;
-      view.ancestry.textContent = (entry.parent ? 'Ramo de '+parentName+' no passo '+integer.format(entry.parent.tick)+' · ' : '')+
-        'Semente '+world.seed+(focussed ? ' · Origem do foco atual' : '');
+      view.ancestry.textContent = 'Semente '+world.seed+(focussed ? ' · Cartão de origem do mapa atual' : '');
       view.measures.tick.textContent = integer.format(world.tick);
       view.measures.population.textContent = integer.format(m.population)+' ('+signed(m.population-entry.base.population)+')';
       view.measures.lineages.textContent = integer.format(m.livingLineages)+' ('+signed(m.livingLineages-entry.base.livingLineages)+')';
@@ -179,7 +245,7 @@ export function mountWorldWatch(root, {getWorld, openWorld, getRemoteReference =
         case 'play': { const card=panel.get(id); card.playing=!card.playing; break; }
         case 'step': panel.advance([id]); break;
         case 'open': {
-          const copy=panel.open(id); openWorld(copy); panel.focusId=id; panel.focusTick=copy.tick;
+          const copy=panel.open(id); openWorld(copy);
           announce('O mapa principal recebeu uma cópia independente de '+panel.get(id).name+'.'); break;
         }
         case 'fork': panel.fork(id,consumeName()); clearName(); announce('Ramo criado no passo atual do cartão.'); break;
@@ -199,7 +265,7 @@ export function mountWorldWatch(root, {getWorld, openWorld, getRemoteReference =
     const el=event.target, id=el.dataset.wwLight;
     if (!id || !ready) return;
     try {
-      panel.get(id).world.setLightForcing(Number(el.value));
+      panel.setLight(id,Number(el.value));
       markDirty(true); draw(); announce('Intensidade de luz atualizada neste cartão.');
     } catch(err) { announce(err.message); }
   }
@@ -209,6 +275,7 @@ export function mountWorldWatch(root, {getWorld, openWorld, getRemoteReference =
   root.addEventListener('click',onClick); root.addEventListener('change',onChange);
   document.addEventListener('visibilitychange',hidden);
   globalThis.addEventListener?.('pagehide',persist);
+  panel.bindFocus(getWorld());
   draw();
   const loaded = (async()=>{
     try {
@@ -221,12 +288,23 @@ export function mountWorldWatch(root, {getWorld, openWorld, getRemoteReference =
     } catch {
       saveStatus.textContent='Armazenamento local indisponível. Os cartões permanecem nesta aba.';
     } finally {
-      if (!destroyed) { ready=true; draw(); }
+      if (!destroyed) { panel.bindFocus(getWorld()); ready=true; draw(); }
     }
   })();
   return {
     ready:loaded, refresh:draw,
-    clearFocus(){ panel.focusId=null; panel.focusTick=null; draw(); },
+    clearFocus(){ panel.bindFocus(getWorld()); if(ready)markDirty(true); draw(); },
+    getFocusOrigin(){
+      const edge=panel.node(panel.focusId)?.parent;
+      if (!edge) return null;
+      const parent=panel.node(edge.id);
+      const branch=parent?.parent;
+      if (edge.action==='open' && branch) {
+        return parent.name+' · '+edgeDescription(branch,panel.node(branch.id)?.name || branch.name)+'.';
+      }
+      return edgeDescription(edge,parent?.name || edge.name)+'.';
+    },
+    getFocusLabel(){ const parent=panel.node(panel.focusId)?.parent; return parent?.action==='open' ? panel.node(parent.id)?.name || parent.name : null; },
     async flush(){ await loaded; await persist(); },
     destroy(){
       destroyed=true; clearTimeout(timer); clearTimeout(saveTimer);

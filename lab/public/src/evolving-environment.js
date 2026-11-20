@@ -85,7 +85,10 @@ function planetOrigin(seed,sample) {
   check(Array.isArray(sites) && sites.length<=64 && sites.every(s=>s && finite(s.x,0,1) && finite(s.y,0,1)))
   const phase = sample.phase ?? 'lagoon'
   check(phase==='lagoon' || phase==='minerals')
+  const transferId=sample.transferId
+  if (transferId!==undefined) check(typeof transferId==='string' && /^[a-zA-Z0-9-]{1,80}$/.test(transferId))
   return {kind:'primordial',seed:sample.seed,tick:sample.tick,phase,silicon:sample.silicon,branchTick:sample.branchTick,
+    ...(transferId===undefined ? {} : {transferId}),
     source:sample.source,formula:sample.formula,mineralUnits:sample.mineralUnits,mineralDensity:sample.mineralDensity,
     carbon:sample.carbon,oxygen:sample.oxygen,sites:sites.map(({x,y})=>({x,y})),elementLedger:checkedLedger(sample)}
 }

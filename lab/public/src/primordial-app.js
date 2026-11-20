@@ -1,3 +1,4 @@
+import {rememberInstrument} from "./instrument-route.js";
 import { PrimordialWorld, PRIMORDIAL_PHASES } from "./primordial.js";
 import { PrimordialView } from "./primordial-view.js";
 import { openSurfaceSample, getOriginReturn } from "./surface-link.js";
@@ -262,4 +263,5 @@ try {
   setRunning(false);
   put("po-error", error.message || "A amostra desta aba expirou.");
 }
+rememberInstrument(()=>world.serialize(), s=>replace(PrimordialWorld.restore(s)));
 draw();requestAnimationFrame(frame);

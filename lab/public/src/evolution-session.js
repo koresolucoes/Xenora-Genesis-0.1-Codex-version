@@ -17,7 +17,9 @@ function readRecord(storage) {
         !speeds.has(record.speed) || !Number.isSafeInteger(record.savedAt) ||
         record.savedAt < 0 || !Number.isSafeInteger(record.remainingSteps) ||
         record.remainingSteps < 0 || record.remainingSteps > MAX_CATCHUP_STEPS) return null;
-    return {...record, world: EvolvingWorld.restore(record.world)};
+    const world=EvolvingWorld.restore(record.world);
+    if(record.watchFocus)world.watchFocus=record.watchFocus;
+    return {...record, world};
   } catch { return null; }
 }
 
@@ -54,7 +56,8 @@ export function openEvolutionSession({
       if (!speeds.has(speed) || !Number.isSafeInteger(remainingSteps) || remainingSteps < 0) return false;
       const value = JSON.stringify({
         version: 1, savedAt: now(), world: world.serialize(), running: Boolean(running), speed,
-        remainingSteps: running ? Math.min(remainingSteps, MAX_CATCHUP_STEPS) : 0
+        remainingSteps: running ? Math.min(remainingSteps, MAX_CATCHUP_STEPS) : 0,
+        watchFocus: world.watchFocus ?? null
       });
       const savedInTab = writeRecord(tab, value);
       const savedLocally = writeRecord(local, value);

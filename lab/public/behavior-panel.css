@@ -1,12 +1,20 @@
-.behavior-panel { color: inherit; min-width: 0; }
-.behavior-panel h2 { margin: 0 0 .6rem; }
-.behavior-panel p, .behavior-panel small { line-height: 1.55; }
-.behavior-panel small { display: block; margin-top: .7rem; }
-.behavior-actions { display: flex; flex-wrap: wrap; gap: .45rem; }
-.behavior-panel table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; margin: .75rem 0; }
-.behavior-panel th, .behavior-panel td { border-bottom:1px solid #425752; padding:.5rem .25rem; text-align:right; font-size:.88rem; }
-.behavior-panel th:first-child { text-align:left; font-weight:500; }
-.behavior-panel [hidden] { display:none !important; }
+.behavior-panel {color:inherit;min-width:0;overflow-wrap:break-word}
+.behavior-panel h2,.behavior-panel h3 {margin:0 0 .35rem;font:600 1.1rem/1.2 var(--sans,system-ui)}
+.behavior-panel h2 {font-size:1.25rem}
+.behavior-panel p {margin:.38rem 0;color:#cbd6ca;font-size:.9rem;line-height:1.45}
+.behavior-panel .bh-individual,.behavior-panel .bh-trial {padding:.8rem .75rem;background:#14231f}
+.behavior-panel .bh-trial {margin-top:.55rem;border-top:1px solid #43534b}
+.behavior-panel .bh-note {font-size:.79rem;color:#b4c1b8}
+.behavior-panel .bh-world {margin-top:.6rem;font-size:.83rem;color:#d9e7cd}
+.behavior-panel .bh-result {font-weight:650;color:#d9ebba}
+.behavior-panel table {border-collapse:collapse;width:100%;margin:.55rem 0;font-variant-numeric:tabular-nums;table-layout:fixed}
+.behavior-panel th,.behavior-panel td {border-bottom:1px solid #3c5146;padding:.4rem .16rem;text-align:right;font-size:.84rem;line-height:1.25}
+.behavior-panel th:first-child {text-align:left}.behavior-panel thead th {font-weight:600;color:#ced9ce}
+.behavior-panel tbody th {font-weight:450}.behavior-panel td small {display:block;color:#acbcae;font-size:.74rem}
+.behavior-panel .bh-trial th:first-child {width:42%}
+.behavior-actions {display:flex;flex-wrap:wrap;gap:.45rem;margin:.65rem 0 .3rem}
+.behavior-panel .bh-download {font-size:.8rem;background:transparent;color:#c2d5b5;border:0;text-decoration:underline;text-underline-offset:.18rem;padding:.3rem 0}
+.behavior-panel [hidden] {display:none!important}
 
 .field-lens-tools { position:absolute; bottom:2.7rem; left:.8rem; display:flex; align-items:center; gap:.15rem; padding:.2rem; border:1px solid #688078; background:#112721ed; color:#f0f6e9; border-radius:.5rem; }
 .field-lens-tools button { min-width:2.2rem; min-height:2.1rem; padding:.2rem .35rem; background:transparent; color:inherit; border:none; font-size:1.1rem; }

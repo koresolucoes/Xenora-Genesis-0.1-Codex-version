@@ -1,7 +1,7 @@
 import { EvolvingWorld } from './evolving-world.js';
 
 export const WATCH_LIMIT = 4;
-const VERSION = 1;
+const VERSION = 2;
 
 function nameOf(name, fallback) {
   return String(name || '').trim().slice(0, 56) || fallback;
@@ -20,11 +20,52 @@ function baseline(world) {
   return {tick: world.tick, population: m.population, livingLineages: m.livingLineages};
 }
 
+
+const kinds = new Set(['map','seed','card','legacy','reference']);
+const interventions = new Set(['open','capture','fork','control','light','legacy']);
+const validId = id => typeof id === 'string' && id.length > 0 && id.length <= 128;
+
+function relation(source,tick,action,from,to) {
+  return {id:source.id,name:source.name,tick,action,...(action==='light' || action==='control' ? {from,to} : {})};
+}
+
+function readParent(raw) {
+  if (raw == null) return null;
+  const action=raw.action ?? 'legacy';
+  if (!validId(raw.id) || !Number.isSafeInteger(raw.tick) || raw.tick<0 || !interventions.has(action))
+    throw new Error('Origem do ramo local inválida.');
+  if (['control','light'].includes(action) && ![raw.from,raw.to].every(n=>Number.isFinite(n)&&n>=0&&n<=2))
+    throw new Error('Intervenção de luz inválida.');
+  return relation({id:raw.id,name:nameOf(raw.name,'Origem registrada')},raw.tick,action,raw.from,raw.to);
+}
+
+function readNode(raw) {
+  if (!raw || !validId(raw.id) || !kinds.has(raw.kind)) throw new Error('Identidade de mundo inválida.');
+  const node={id:raw.id,name:nameOf(raw.name,'Mundo local'),kind:raw.kind,parent:readParent(raw.parent)};
+  if(Number.isInteger(raw.seed) && raw.seed>=0 && raw.seed<=0xffffffff)node.seed=raw.seed;
+  if(raw.lightChange)node.lightChange=readLight(raw.lightChange);
+  return node;
+}
+
+function readLight(change) {
+  if(!Number.isSafeInteger(change.tick) || change.tick<0 || ![change.from,change.to].every(n=>Number.isFinite(n)&&n>=0&&n<=2))
+    throw new Error('Alteração de luz inválida.');
+  return {tick:change.tick,from:change.from,to:change.to};
+}
+
+function metadata(entry) {
+  const node={id:entry.id,name:entry.name,kind:entry.kind,parent:entry.parent && {...entry.parent}};
+  const seed=entry.world?.seed ?? entry.seed;
+  if(seed!==undefined)node.seed=seed;
+  if(entry.lightChange)node.lightChange={...entry.lightChange};
+  return node;
+}
+
 export class WorldWatch {
   constructor() {
     this.entries = new Map();
     this.focusId = null;
-    this.focusTick = null;
+    this.nodes = new Map();
     this.removed = null;
   }
 
@@ -38,46 +79,79 @@ export class WorldWatch {
     return item;
   }
 
-  insert(world, name, parent = null, ref = null) {
+  node(id) {
+    return this.entries.get(id) || this.nodes.get(id);
+  }
+
+  // The map and each card evolve independently. Opening a card starts a new
+  // map trajectory, even when they still share the same seed and tick.
+  bindFocus(world) {
+    let node;
+    if (world.watchFocus) {
+      try { node=readNode(world.watchFocus); } catch { /* Legacy sessions have no provenance. */ }
+    }
+    if (!node || node.kind!=='map' || node.parent?.tick>world.tick || (node.seed!==undefined && node.seed!==world.seed))
+      node={id:crypto.randomUUID(),kind:'map',name:'Mundo do mapa',parent:null};
+    node.seed=world.seed;
+    world.watchFocus=metadata(node);
+    this.nodes.set(node.id,node);
+    this.focusId=node.id;
+    return node;
+  }
+
+  relations() {
+    const result=new Map();
+    const active=[...this.entries.keys(),this.focusId].filter(Boolean);
+    for (const id of active) {
+      let node=this.node(id);
+      while (node && !result.has(node.id)) {
+        result.set(node.id,metadata(node));
+        const parent=node.parent;
+        node=parent && (this.node(parent.id) || {id:parent.id,name:parent.name,kind:'reference',parent:null});
+      }
+    }
+    return result;
+  }
+
+  insert(world, name, parent = null, ref = null, kind='card') {
     this.ensureRoom();
     const id = crypto.randomUUID();
     const entry = {id, name: nameOf(name, 'Mundo ' + world.seed), world,
-      base: baseline(world), parent, remote: remoteReference(ref), playing: false};
+      base: baseline(world), parent, kind, remote: remoteReference(ref), playing: false};
     this.entries.set(id, entry);
     return entry;
   }
 
   capture(world, name, ref = null) {
     this.ensureRoom();
-    if (this.focusId && this.entries.has(this.focusId)) {
-      const source = this.get(this.focusId);
-      const parent = {id: source.id, name: source.name, tick: this.focusTick ?? world.tick};
-      return this.insert(EvolvingWorld.restore(world.serialize()), nameOf(name, 'Cópia do foco'), parent, ref);
-    }
-    return this.insert(EvolvingWorld.restore(world.serialize()), nameOf(name, 'Referência do foco'), null, ref);
+    const source=this.bindFocus(world);
+    return this.insert(EvolvingWorld.restore(world.serialize()), nameOf(name,'Cópia do mapa'),
+      relation(source,world.tick,'capture'),ref);
   }
 
   create(seed, name) {
     this.ensureRoom();
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) throw new Error('Use uma semente inteira entre 0 e 4294967295.');
-    return this.insert(new EvolvingWorld(seed), name);
+    return this.insert(new EvolvingWorld(seed), name,null,null,'seed');
   }
 
   fork(id, name) {
     this.ensureRoom();
     const source = this.get(id);
     return this.insert(EvolvingWorld.restore(source.world.serialize()), nameOf(name, 'Ramo de ' + source.name),
-      {id, name: source.name, tick: source.world.tick}, source.remote);
+      relation(source,source.world.tick,'fork'), source.remote);
   }
 
   pair(world, name, reference = null) {
     this.ensureRoom(2);
-    const original = this.capture(world, nameOf(name, 'Controle'), reference);
-    const child = this.fork(original.id, 'Luz alterada');
-    const forcing = child.world.environment.lightForcing;
-    // Either reduce light or restore it if the focus was already dark.
-    const normal = Number.isFinite(forcing) ? forcing : 1;
-    child.world.setLightForcing(normal >= 0.4 ? normal / 2 : 1);
+    const source=this.bindFocus(world);
+    const forcing=world.environment.lightForcing, changed=forcing>=0.4 ? forcing/2 : 1;
+    const snapshot=world.serialize();
+    const original=this.insert(EvolvingWorld.restore(snapshot),nameOf(name,'Luz de referência'),
+      relation(source,world.tick,'control',forcing,forcing),reference);
+    const child=this.insert(EvolvingWorld.restore(snapshot),'Luz alterada',
+      relation(source,world.tick,'light',forcing,changed),reference);
+    child.world.setLightForcing(changed);
     original.playing = true;
     child.playing = true;
     return [original, child];
@@ -86,8 +160,9 @@ export class WorldWatch {
   open(id) {
     const entry = this.get(id);
     const copy = EvolvingWorld.restore(entry.world.serialize());
-    this.focusId = id;
-    this.focusTick = copy.tick;
+    copy.watchFocus={id:crypto.randomUUID(),kind:'map',name:'Mapa de '+entry.name,
+      parent:relation(entry,copy.tick,'open')};
+    this.bindFocus(copy);
     return copy;
   }
 
@@ -97,11 +172,17 @@ export class WorldWatch {
     for (let i = 0; i < steps; i++) for (const card of cards) card.world.step();
   }
 
+  setLight(id,to) {
+    const item=this.get(id),from=item.world.environment.lightForcing;
+    item.world.setLightForcing(to);
+    if(from!==to)item.lightChange={tick:item.world.tick,from,to};
+  }
+
   remove(id) {
     this.removed = this.get(id);
     this.removed.playing = false;
+    this.nodes.set(id,metadata(this.removed));
     this.entries.delete(id);
-    if (this.focusId === id) { this.focusId = null; this.focusTick = null; }
   }
 
   undoRemove() {
@@ -114,8 +195,11 @@ export class WorldWatch {
   }
 
   checkpoint() {
-    return {version: VERSION, cards: [...this.entries.values()].map(card => ({
-      id: card.id, name: card.name, base: {...card.base}, parent: card.parent && {...card.parent},
+    const relations=this.relations();
+    const origins=[...relations.values()].filter(node=>!this.entries.has(node.id));
+    return {version: VERSION, focusId:this.focusId, origins, cards: [...this.entries.values()].map(card => ({
+      id: card.id, name: card.name, kind:card.kind, base: {...card.base}, parent: card.parent && {...card.parent},
+      ...(card.lightChange ? {lightChange:{...card.lightChange}} : {}),
       remote: remoteReference(card.remote), checkpoint: card.world.serialize()
     }))};
   }
@@ -123,25 +207,45 @@ export class WorldWatch {
   static restore(saved) {
     const panel = new WorldWatch();
     if (saved == null) return panel;
-    if (saved.version !== VERSION || !Array.isArray(saved.cards) || saved.cards.length > WATCH_LIMIT) {
+    if (![1,VERSION].includes(saved.version) || !Array.isArray(saved.cards) || saved.cards.length > WATCH_LIMIT) {
       throw new Error('Formato do painel salvo incompatível.');
     }
     for (const raw of saved.cards) {
-      if (!raw || typeof raw.id !== 'string' || !raw.id || panel.entries.has(raw.id)) throw new Error('Identidade de execução inválida.');
+      if (!raw || !validId(raw.id) || panel.entries.has(raw.id)) throw new Error('Identidade de execução inválida.');
       const world = EvolvingWorld.restore(raw.checkpoint);
       const base = raw.base;
       if (!base || ![base.tick, base.population, base.livingLineages].every(n => Number.isSafeInteger(n) && n >= 0) || base.tick > world.tick) {
         throw new Error('Ponto inicial do cartão inválido.');
       }
-      let parent = null;
-      if (raw.parent) {
-        if (typeof raw.parent.id !== 'string' || !Number.isSafeInteger(raw.parent.tick) || raw.parent.tick < 0 || raw.parent.tick > base.tick) {
-          throw new Error('Origem do ramo local inválida.');
-        }
-        parent = {id: raw.parent.id, name: nameOf(raw.parent.name, 'Ramo'), tick: raw.parent.tick};
-      }
-      panel.entries.set(raw.id, {id: raw.id, name: nameOf(raw.name, 'Mundo ' + world.seed), world,
+      const parent=readParent(raw.parent);
+      if(parent && parent.tick>base.tick)throw new Error('Origem do ramo local inválida.');
+      const kind=saved.version===1 ? 'legacy' : raw.kind;
+      if(!['legacy','seed','card'].includes(kind))throw new Error('Origem do cartão inválida.');
+      const lightChange=raw.lightChange ? readLight(raw.lightChange) : null;
+      if(lightChange && (lightChange.tick<base.tick || lightChange.tick>world.tick || lightChange.to!==world.environment.lightForcing))
+        throw new Error('Passo ou intensidade da intervenção inválidos.');
+      panel.entries.set(raw.id, {id: raw.id, name: nameOf(raw.name, 'Mundo ' + world.seed), world,kind,
+        ...(lightChange ? {lightChange} : {}),
         base: {...base}, parent, remote: remoteReference(raw.remote), playing: false});
+    }
+    if (saved.version===VERSION) {
+      if(!Array.isArray(saved.origins))throw new Error('Histórico de origens inválido.');
+      for(const row of saved.origins) {
+        const node=readNode(row);
+        if(panel.node(node.id))throw new Error('Identidade de mundo duplicada.');
+        panel.nodes.set(node.id,node);
+      }
+      if(saved.focusId!=null && panel.node(saved.focusId)?.kind!=='map')throw new Error('Foco do mapa inválido.');
+      panel.focusId=saved.focusId ?? null;
+    }
+    const checked=new Set();
+    for (const id of [...panel.entries.keys(),...panel.nodes.keys()]) {
+      const path=new Set(); let node=panel.node(id);
+      while(node && !checked.has(node.id)) {
+        if(path.has(node.id))throw new Error('Ciclo nas relações entre mundos.');
+        path.add(node.id); node=node.parent && panel.node(node.parent.id);
+      }
+      for(const key of path)checked.add(key);
     }
     return panel;
   }

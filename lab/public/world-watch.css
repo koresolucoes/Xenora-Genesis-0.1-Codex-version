@@ -28,6 +28,16 @@
 .ww-light{display:flex;align-items:center;justify-content:space-between;padding:.38rem 0 .62rem}
 .ww-light select{min-width:5rem;min-height:2rem}.ww-trace,.ww-origin{font-size:.8rem}
 .ww-bottom{justify-content:flex-start;margin-top:.42rem}
+.ww-tree{list-style:none;padding:0;margin:.9rem 0;display:grid;gap:.28rem}
+.ww-node{position:relative;margin-inline-start:calc(var(--ww-level,0)*clamp(.5rem,2.2vw,1.25rem));border-left:2px solid #657e71;padding:.4rem .65rem}
+.ww-node[data-ww-parent]::before{content:"";position:absolute;left:-.48rem;top:1.05rem;width:.43rem;height:1px;background:#657e71}
+.ww-node[aria-current=true]{background:#23392f;border-color:#b5d99c;border-radius:0 5px 5px 0}
+.ww-node-title{display:flex;align-items:center;gap:.35rem .6rem;flex-wrap:wrap}
+.ww-node-link,.ww-node-name{overflow-wrap:anywhere;font-size:.94rem;font-weight:650}
+.ww-node-link{padding:.17rem .4rem;min-height:1.85rem;color:#c1e4b2;text-decoration:underline;text-underline-offset:.18em}
+.ww-node-role,.ww-node-description,.ww-focus-label{font-size:.78rem;line-height:1.4}
+.ww-node-description{display:block;margin-top:.15rem;color:#bdcbbf;overflow-wrap:anywhere}
+.ww-focus-label{font-weight:650;color:#d0efb9}.ww-node-role{color:#b0bfb7}
 @media(max-width:700px){.ww-grid{grid-template-columns:1fr}.ww-header{align-items:flex-start}.ww-setup input[type=text]{width:100%}}
 .ww-panel{container-type:inline-size}
 @container (max-width:30rem){
