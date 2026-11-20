@@ -75,8 +75,12 @@ function smoothPath(ctx, vertices, scale = 1) {
   ctx.closePath()
 }
 
-// All specimen art is drawn in the same local coordinate system as its overview sprite.
-function organism(ctx, seed) {
+// Geometry is inherited per lineage and shared by the map and microscope.
+// Only geometry is cached. The four material stocks are read at draw time.
+const anatomyShapes = new Map()
+
+function organismShape(seed) {
+  if (anatomyShapes.has(seed)) return anatomyShapes.get(seed)
   const rng = random(seed + 337)
   const phase = rng() * TAU
   const broad = 20 + rng() * 8
@@ -84,7 +88,23 @@ function organism(ctx, seed) {
     const shape = 1 + 0.075 * Math.sin(3 * a + phase) + 0.04 * Math.sin(5 * a - phase)
     return [Math.cos(a) * 42 * shape, Math.sin(a) * broad * shape * (1.04 - 0.17 * Math.cos(a)) + 2.6 * Math.cos(2 * a + phase)]
   }
-  const membrane = Array.from({ length: 22 }, (_, i) => point(TAU * i / 22))
+  const membrane = Array.from({ length: 28 }, (_, i) => point(TAU * i / 28))
+  // Golden-angle placement keeps pigment sites apart as their number changes.
+  const pigmentSites = Array.from({ length: 25 }, (_, i) => {
+    const angle = phase + i * 2.399963
+    const [x, y] = point(angle)
+    const inset = 0.46 + 0.33 * rng()
+    return { x: x * inset, y: y * inset, rotation: angle + Math.PI / 2 + (rng() - 0.5) * 0.55,
+      size: 0.78 + rng() * 0.42 }
+  })
+  const shape = { point, membrane, phase, broad, pigmentSites }
+  anatomyShapes.set(seed, shape)
+  return shape
+}
+
+function organism(ctx, seed) {
+  const rng = random(seed + 619)
+  const { point, membrane, phase, broad } = organismShape(seed)
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
@@ -118,11 +138,11 @@ function organism(ctx, seed) {
   }
 
   const body = ctx.createLinearGradient(-12, -30, 10, 34)
-  body.addColorStop(0, 'rgba(163,225,176,.91)')
-  body.addColorStop(0.13, 'rgba(74,153,126,.90)')
-  body.addColorStop(0.40, 'rgba(27,97,81,.86)')
-  body.addColorStop(0.75, 'rgba(41,100,82,.87)')
-  body.addColorStop(1, 'rgba(110,175,137,.94)')
+  body.addColorStop(0, 'rgba(163,206,182,.92)')
+  body.addColorStop(0.15, 'rgba(83,151,140,.88)')
+  body.addColorStop(0.43, 'rgba(29,86,88,.88)')
+  body.addColorStop(0.8, 'rgba(40,92,92,.88)')
+  body.addColorStop(1, 'rgba(120,166,151,.94)')
   smoothPath(ctx, membrane)
   ctx.fillStyle = body
   ctx.fill()
@@ -162,45 +182,94 @@ function organism(ctx, seed) {
     ctx.lineWidth = i % 3 ? 0.65 : 1.1
     ctx.stroke()
   }
-  for (let i = 0; i < 8; i++) {
-    const a = TAU * (i + rng()) / 8
-    const x = Math.cos(a) * (19 + rng() * 11), y = Math.sin(a) * (broad * 0.53 + rng() * 4)
-    const rx = 2 + rng() * 3.4, ry = rx * (0.48 + rng() * 0.34)
-    const rot = rng() * Math.PI
-    ellipse(ctx, x, y, rx, ry, 'rgba(21,77,68,.80)', rot, 'rgba(161,212,156,.80)', 0.69)
-    ellipse(ctx, x - 0.5, y - 0.4, rx * 0.43, ry * 0.4, 'rgba(125,181,139,.65)', rot)
-  }
-  // A dense, irregular nucleus is distinct from the clear, watery cytoplasm.
-  const nx = -6 + rng() * 12, ny = -2 + rng() * 4
-  const nucleus = Array.from({ length: 15 }, (_, i) => {
-    const a = i * TAU / 15
-    const k = 0.87 + rng() * 0.23
-    return [Math.cos(a) * 14.4 * k, Math.sin(a) * 9.3 * k]
-  })
-  ctx.save()
-  ctx.translate(nx, ny)
-  ctx.rotate((rng() - 0.5) * 0.7)
-  ctx.fillStyle = gradient(ctx, -1, 0, 22, [[0, 'rgba(204,241,103,.50)'], [0.51, 'rgba(156,216,91,.30)'], [1, 'rgba(126,203,78,0)']])
-  ctx.fillRect(-24, -24, 48, 48)
-  smoothPath(ctx, nucleus)
-  const nuc = ctx.createLinearGradient(-5, -9, 5, 10)
-  nuc.addColorStop(0, '#ebf8ab')
-  nuc.addColorStop(0.26, '#d7ee85')
-  nuc.addColorStop(0.72, '#9bbd55')
-  nuc.addColorStop(1, '#759a56')
-  ctx.fillStyle = nuc
-  ctx.fill()
-  ctx.strokeStyle = '#8baf64'
-  ctx.lineWidth = 1.1
-  ctx.stroke()
-  ctx.clip()
-  for (let i = 0; i < 28; i++) {
-    const x = (rng() - 0.5) * 29, y = (rng() - 0.5) * 18
-    const r = 0.47 + rng() * 1.65
-    ellipse(ctx, x, y, r, r * 0.66, i % 3 ? 'rgba(97,137,70,.52)' : 'rgba(244,255,191,.81)', rng() * Math.PI)
-  }
-  ellipse(ctx, -3, -3.8, 3.5, 1.7, 'rgba(251,255,185,.86)', -0.3)
   ctx.restore()
+}
+
+function moleculeStocks(entity) {
+  const cell = entity.cell
+  if (!cell) return null
+  const mass = cell.membrane + cell.pigment + cell.transporters + cell.reserve
+  if (!(mass > 0)) return null
+  return { wall: cell.membrane / mass, pigment: cell.pigment / mass,
+    transport: cell.transporters / mass, reserve: cell.reserve, reserveFraction: cell.reserve / mass }
+}
+
+function paintMolecules(ctx, entity, seed, fine) {
+  const stock = moleculeStocks(entity)
+  if (!stock) return
+  const shape = organismShape(seed)
+  const pigment = clamp(stock.pigment / 0.4, 0, 1)
+  const allocation = clamp(entity.genome?.allocation ?? 0.5, 0, 1)
+  const innerScale = 0.975 - 0.17 * clamp(stock.wall, 0, 1)
+  ctx.save()
+  ctx.lineCap = 'round'
+  smoothPath(ctx, shape.membrane, innerScale)
+  ctx.fillStyle = 'rgba(143,184,47,' + 0.54 * pigment + ')'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(16,52,54,.92)'
+  ctx.lineWidth = 2.15
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(219,240,199,.78)'
+  ctx.lineWidth = 0.85
+  ctx.stroke()
+  ctx.save()
+  ctx.clip()
+
+  // Peripheral discs are the light-absorbing material. Density and color
+  // track the current pigment fraction. The genome biases their placement
+  // slightly along the body axis without changing the amount expressed.
+  const count = Math.min(shape.pigmentSites.length, Math.round(stock.pigment * 60))
+  const green = Math.round(176 + 57 * pigment)
+  const color = 'rgb(' + Math.round(112 + 83 * pigment) + ',' + green + ',77)'
+  for (let i = 0; i < count; i++) {
+    const site = shape.pigmentSites[i]
+    const x = site.x * (0.94 + 0.09 * allocation)
+    const y = site.y
+    const r = site.size * (3.1 + 0.95 * pigment)
+    ellipse(ctx,x,y,r,r*0.61,color,site.rotation,'rgba(37,78,56,.92)',0.8)
+    if (fine) {
+      const dx = Math.cos(site.rotation) * r * 0.56
+      const dy = Math.sin(site.rotation) * r * 0.56
+      ctx.beginPath()
+      ctx.moveTo(x-dx, y-dy)
+      ctx.lineTo(x+dx, y+dy)
+      ctx.strokeStyle = 'rgba(248,255,176,.9)'
+      ctx.lineWidth = 0.72
+      ctx.stroke()
+    }
+  }
+
+  // Amber inclusions are stored matter. Their area responds to the actual
+  // reserve, retaining a visible change even during proportional body growth.
+  if (stock.reserve > 0) {
+    const areaScale = clamp(0.8 * stock.reserve + 1.5 * stock.reserveFraction, 0, 2.6)
+    const size = Math.sqrt(areaScale)
+    const offsetY = Math.sin(shape.phase) * 2
+    const stores = [[-4,1.5,6.1,3.9], [5,-1.8,3.4,2.5], [0,6.0,2.5,1.6]]
+    for (const [x,y,rx,ry] of stores) {
+      ellipse(ctx,x,y+offsetY,rx*size,ry*size,'rgba(218,164,71,.95)',-0.28,'rgba(68,77,48,.94)',0.85)
+      if (fine) ellipse(ctx,x-rx*size*0.22,y+offsetY-ry*size*0.3,rx*size*0.46,ry*size*0.22,'#f4dca0',-0.28)
+    }
+  }
+  ctx.restore()
+
+  // Transport complexes traverse both membrane layers. Two turquoise sides
+  // flank a dark aperture; the number of visible pores follows the stock.
+  const pores = Math.min(32, Math.round(stock.transport * 37))
+  for (let i = 0; i < pores; i++) {
+    const angle = shape.phase + i * TAU / pores
+    const [x, y] = shape.point(angle)
+    const inner = innerScale - 0.045
+    ctx.beginPath()
+    ctx.moveTo(x * inner, y * inner)
+    ctx.lineTo(x * 1.018, y * 1.018)
+    ctx.strokeStyle = '#67cfca'
+    ctx.lineWidth = fine ? 2.75 : 3.25
+    ctx.stroke()
+    ctx.strokeStyle = '#185255'
+    ctx.lineWidth = 1.15
+    ctx.stroke()
+  }
   ctx.restore()
 }
 
@@ -267,9 +336,12 @@ function particulate(ctx, type, seed) {
   }
 }
 
-function sprite(type, entity) {
-  const variant = hash(entity.id) % (type === 'organism' ? 96 : 32)
-  const key = type + variant
+function appearanceKey(type, entity) {
+  const variant = type === 'organism' ? hash(entity.lineage ?? entity.id) % 96 : hash(entity.id) % 32
+  return type + variant
+}
+
+function sprite(type, key) {
   if (sprites.has(key)) return sprites.get(key)
   const image = makeCanvas(264, 224)
   const ctx = image.getContext('2d')
@@ -298,7 +370,7 @@ function orientation(type, entity) {
   return type === 'organism' ? Number(entity.angle) || 0 : ((hash(entity.id) % 180) / 180 - 0.5) * Math.PI
 }
 
-function paintEntity(ctx, type, ent, x, y, radius, tick = 0) {
+function paintEntity(ctx, type, ent, x, y, radius, tick = 0, zoom = 1) {
   const s = radius / (type === 'organism' ? 42 : type === 'grain' ? 31 : type === 'mineral' ? 34 : 27)
   ctx.save()
   ctx.translate(x, y)
@@ -306,7 +378,11 @@ function paintEntity(ctx, type, ent, x, y, radius, tick = 0) {
   // A slight contraction is tied to simulation time, including in the microscope.
   const pulse = type === 'organism' ? 1 + 0.020 * Math.sin(tick * 0.33 + (ent.phase || 0)) : 1
   ctx.scale(s * pulse, s / pulse)
-  ctx.drawImage(sprite(type, ent), -66, -56, 132, 112)
+  const key = appearanceKey(type, ent)
+  ctx.drawImage(sprite(type, key), -66, -56, 132, 112)
+  if (type === 'organism') {
+    paintMolecules(ctx, ent, hash(key), radius * zoom >= 34)
+  }
   ctx.restore()
 }
 
@@ -400,7 +476,7 @@ export class LagoonView {
     for (const type of paintOrder) {
       for (const body of world[groups[type]] || []) {
         const radius = sizeFor(type, body, w, h), x = body.x * w, y = body.y * h
-        paintEntity(ctx, type, body, x, y, radius, world.tick)
+        paintEntity(ctx, type, body, x, y, radius, world.tick, this.zoom)
       }
     }
     if (ent) markSelection(ctx, ent.x*w, ent.y*h, sizeFor(selected.type,ent,w,h))
@@ -417,7 +493,9 @@ export function drawSpecimen(canvas, world, selected, now) {
   if (!canvas) return
   const { ctx, w, h } = dimensions(canvas)
   const ent = selectedEntity(world, selected)
-  const frame = [world.tick, selected?.id, selected?.type, !!ent, canvas.width, canvas.height].join('|')
+  const cell = ent?.cell
+  const frame = [world.tick, selected?.id, selected?.type, !!ent, canvas.width, canvas.height,
+    cell?.membrane, cell?.pigment, cell?.transporters, cell?.reserve, ent?.genome?.allocation].join('|')
   const previous = specimenFrames.get(canvas)
   if (previous?.world === world && previous?.frame === frame) return
   specimenFrames.set(canvas, {world, frame})

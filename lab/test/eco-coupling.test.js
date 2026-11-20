@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { World } from "../public/src/engine.js";
+import { readLegacyWorld } from "./fixtures/previous-worlds.mjs";
 
 function close(actual, expected, tolerance = 1e-9) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
@@ -24,7 +25,8 @@ test("erosion moves existing solid into local water; absorbing it consumes energ
   assert.equal(control.absorbNutrient(original), 0);
   const x = original.x, y = original.y;
   const emptyBefore = control.getMetrics();
-  const dose = 0.018;
+  // Small enough for all transporter allocations to exhaust the local supply.
+  const dose = 0.01;
   control.addNutrientPulse(x, y, dose);
   close(control.absorbNutrient(original), dose);
   assert.equal(control.absorbNutrient(original), 0);
@@ -95,21 +97,18 @@ test("material pulse and branch history survive save/restore and replay", () => 
 });
 
 test("version 1 migration keeps old stocks, starts clear water and records only known history", () => {
-  // Version 1 never represented dissolved material. Its tick-zero checkpoint
-  // has the same seeded entities and schema as v2 before the first erosion.
-  const old = new World(111).serialize();
-  delete old.environment;
-  delete old.telemetry;
-  delete old.nutrientInputTotal;
-  old.version = 1;
+  const old = readLegacyWorld(1);
   const migrated = World.restore(old);
   assert.equal(migrated.environment.totals().total, 0);
   assert.equal(migrated.getMetrics().totalMass, old.initialMass);
   assert.equal(migrated.getMetrics().totalEnergy, old.initialEnergy);
-  assert.deepEqual(migrated.organisms, old.organisms);
+  assert.deepEqual(migrated.organisms.map(org => org.id), old.organisms.map(org => org.id));
+  for (const [index, previous] of old.organisms.entries()) {
+    for (const [key, value] of Object.entries(previous)) assert.deepEqual(migrated.organisms[index][key], value);
+  }
   assert.deepEqual(migrated.grains, old.grains);
   assert.equal(migrated.telemetry.length, 1);
-  assert.equal(migrated.serialize().version, 2);
+  assert.equal(migrated.serialize().version, 3);
   advance(migrated, 37);
   const restored = World.restore(migrated.serialize());
   advance(migrated, 27);
@@ -117,7 +116,7 @@ test("version 1 migration keeps old stocks, starts clear water and records only 
   assert.deepEqual(restored.serialize(), migrated.serialize());
 });
 
-test("version 2 checkpoints reject damaged dissolved mass, pulse counters and history", () => {
+test("both legacy and current checkpoints reject damaged dissolved mass, pulse counters and history", () => {
   const world = new World(42);
   world.addNutrientPulse(0.2, 0.4, 1);
   advance(world, 12);
@@ -131,8 +130,9 @@ test("version 2 checkpoints reject damaged dissolved mass, pulse counters and hi
     s => { s.telemetry[0].bodyMass += 5; },
     s => { s.telemetry[0].nutrientMass = null; }
   ]) {
-    const broken = world.serialize();
-    breakState(broken);
-    assert.throws(() => World.restore(broken));
+    for (const broken of [readLegacyWorld(2), world.serialize()]) {
+      breakState(broken);
+      assert.throws(() => World.restore(broken));
+    }
   }
 });

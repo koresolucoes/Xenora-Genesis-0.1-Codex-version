@@ -1,11 +1,20 @@
 import { World } from './engine.js';
 import { LagoonView } from './render.js';
 import { ScienceDashboard } from './dashboard.js';
+import { mountCellInspector } from './molecular-inspector.js';
 
 const byId = id => document.getElementById(id);
 const canvas = byId('lagoon');
 const view = new LagoonView(canvas);
 const dashboard = new ScienceDashboard(byId('dashboard'));
+const cellInspector = mountCellInspector(byId('inspector-rows'), examineOrganism);
+const examineCell = document.createElement('button');
+examineCell.type = 'button';
+examineCell.id = 'examine-cell';
+examineCell.className = 'examine-cell';
+examineCell.textContent = 'Examinar uma célula';
+examineCell.setAttribute('aria-controls', 'cell-compartments');
+document.querySelector('.key').append(examineCell);
 const seedInput = byId('seed-input');
 const keyInput = byId('cloud-key');
 const speedLevels = [0.5, 1, 2];
@@ -164,6 +173,9 @@ function renderInspector() {
   }
   byId('specimen-canvas').hidden = Boolean(waterProbe);
   byId('water-lens').hidden = !waterProbe;
+  const item = findSelected();
+  examineCell.disabled = world.organisms.length === 0;
+  cellInspector.show(!waterProbe && selected?.type === 'organism' ? item : null, world.organisms);
   if (waterProbe) {
     setText('inspector-title', 'Coluna de água');
     setText('inspector-kind', 'Sonda ambiental');
@@ -171,7 +183,6 @@ function renderInspector() {
     kvRows(waterReadings(waterProbe));
     return;
   }
-  const item = findSelected();
   if (!item) {
     setText('inspector-title', selected ? entityTypes[selected.type].name + ' ' + selected.id : 'Selecione uma entidade');
     setText('inspector-kind', selected ? 'Saiu do campo' : 'Inspeção');
@@ -182,7 +193,14 @@ function renderInspector() {
   setText('inspector-title', info.name + ' ' + String(item.id).padStart(3, '0'));
   setText('inspector-kind', info.kind);
   let rows;
-  if (selected.type === 'organism') {
+  if (selected.type === 'organism' && item.cell) {
+    rows = [
+      ['Sensibilidade', fixed.format(item.sensitivity)],
+      ['Luz local', format.format(world.lightAt(item.x, item.y) * 100) + '%'],
+      ['Nutriente local', format.format(world.environment.sample(item.x, item.y).nutrient) + ' u.m./área'],
+      ['Idade', format.format(item.age) + ' passos']
+    ];
+  } else if (selected.type === 'organism') {
     rows = [
       ['Geração', String(item.generation)],
       ['Reserva de energia', fixed.format(item.energy)],
@@ -267,6 +285,26 @@ function frame(now) {
   }
   requestAnimationFrame(frame);
 }
+
+function examineOrganism(id) {
+  const organism = world.organisms.find(other => other.id === id);
+  if (!organism) { announce('Esta célula já saiu da lagoa.'); return; }
+  tool = 'inspect';
+  selectEntity({ type: 'organism', id: organism.id });
+  updateControls();
+  renderInspector();
+  cellInspector.open();
+  const heading = byId('inspector-title');
+  heading.tabIndex = -1;
+  heading.focus({ preventScroll: true });
+  document.querySelector('.specimen').scrollIntoView({ block: 'nearest' });
+}
+
+examineCell.addEventListener('click', () => {
+  const current = selected?.type === 'organism' ? findSelected() : null;
+  const organism = current || world.organisms[0];
+  if (organism) examineOrganism(organism.id);
+});
 
 byId('play').addEventListener('click', () => pauseOrPlay(!running));
 byId('step').addEventListener('click', () => {

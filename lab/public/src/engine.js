@@ -1,9 +1,13 @@
 import { Environment } from "./environment.js";
+import {
+  assimilateMolecules, createCell, createGenome, divideMolecules, makeGenome, molecularTraits,
+  remodelFromReserve, validMolecules
+} from "./molecular.js";
 
 // Reactive matter occupies five compartments. A nutrient pulse is the only
 // external material input; absorbed light contributes to the separate energy budget.
 const TAU = 2 * Math.PI;
-const SNAPSHOT_VERSION = 2;
+const SNAPSHOT_VERSION = 3;
 const EVENT_LIMIT = 100;
 const LIGHT_CELLS = 16;
 const TELEMETRY_INTERVAL = 10;
@@ -62,8 +66,15 @@ function validOrganism(org, nextId) {
     Number.isFinite(org.passiveDistance) && org.passiveDistance >= 0;
 }
 
+function initializeMolecules(org, genome) {
+  org.genome = genome;
+  org.cell = createCell(org.mass, genome);
+  org.mutationDelta = 0;
+  org.flux = { light: 0, uptake: 0 };
+}
+
 function validCheckpoint(state, dissolvedMass) {
-  if (!record(state) || ![1, SNAPSHOT_VERSION].includes(state.version) || !validPosition(state.light) ||
+  if (!record(state) || ![1, 2, SNAPSHOT_VERSION].includes(state.version) || !validPosition(state.light) ||
     !integer(state.seed, 0, 0xffffffff) || !integer(state.rng, 1, 0xffffffff) ||
     !integer(state.tick) || !integer(state.nextId, 1) ||
     !["initialPopulation", "births", "deaths"].every(key => integer(state[key])) ||
@@ -77,6 +88,9 @@ function validCheckpoint(state, dissolvedMass) {
     state.events.length > EVENT_LIMIT) return false;
   const input = state.version === 1 ? 0 : state.nutrientInputTotal;
   if (!inRange(input, 0, Number.MAX_SAFE_INTEGER)) return false;
+  if (state.version === SNAPSHOT_VERSION && (!integer(state.molecularSinceTick, 0, state.tick) ||
+      !inRange(state.capturedLightLastTick, 0, state.absorbedEnergy + 1e-8) ||
+      !inRange(state.dissolvedUptakeLastTick, 0, Number.MAX_SAFE_INTEGER))) return false;
   const ids = new Set();
   for (const group of ["organisms", "grains", "minerals", "detritus"]) {
     for (const obj of state[group]) {
@@ -88,7 +102,27 @@ function validCheckpoint(state, dissolvedMass) {
       if (!inRange(obj.mass, Number.EPSILON, state.initialMass + input) ||
         Math.abs(obj.radius - (group === "organisms" ? bodyRadius(obj.mass) : grainRadius(obj.mass))) > 1e-10) return false;
       if (group === "organisms" && !validOrganism(obj, state.nextId)) return false;
+      if (group === "organisms" && state.version === SNAPSHOT_VERSION && (!validMolecules(obj) ||
+          ![-0.05, 0, 0.05].includes(obj.mutationDelta) ||
+          (obj.generation === 0 && obj.mutationDelta !== 0) ||
+          !inRange(obj.genome.allocation - obj.mutationDelta, -1e-12, 1 + 1e-12) ||
+          !record(obj.flux) || !inRange(obj.flux.light, 0, 9) ||
+          !inRange(obj.flux.uptake, 0, Number.MAX_SAFE_INTEGER))) return false;
       if (group === "detritus" && !integer(obj.decayAt, state.tick + 1)) return false;
+    }
+  }
+  if (state.version === SNAPSHOT_VERSION) {
+    const living = new Map(state.organisms.map(org => [org.id, org]));
+    for (const child of state.organisms) {
+      const parent = living.get(child.parent);
+      if (!parent) continue;
+      const delta = child.genome.allocation - parent.genome.allocation;
+      if (Math.abs(delta - child.mutationDelta) > 1e-12) return false;
+      let changed = 0;
+      for (let i = 0; i < child.genome.sequence.length; i++) {
+        if (child.genome.sequence[i] !== parent.genome.sequence[i]) changed++;
+      }
+      if (changed !== (child.mutationDelta === 0 ? 0 : 1)) return false;
     }
   }
   let prevTick = 0;
@@ -128,6 +162,9 @@ export class World {
     this.absorbedEnergy = 0;
     this.dissipatedEnergy = 0;
     this.nutrientInputTotal = 0;
+    this.molecularSinceTick = 0;
+    this.capturedLightLastTick = 0;
+    this.dissolvedUptakeLastTick = 0;
     this.telemetry = [];
 
     const rocks = [[0.15, 0.23, 0.026], [0.22, 0.76, 0.037], [0.52, 0.28, 0.032],
@@ -153,6 +190,9 @@ export class World {
         maxAge: 1050 + Math.floor(this.random() * 850), cooldown: Math.floor(this.random() * 30),
         phase: this.random() * TAU, activeDistance: 0, passiveDistance: 0 });
     }
+    // Assign founder genotypes after placing all initial entities so their
+    // starting locations and material inventories stay paired across model versions.
+    for (const org of this.organisms) initializeMolecules(org, createGenome(() => this.random()));
     this.initialPopulation = this.organisms.length;
     this.initialMass = total(this.grains, "mass") + total(this.organisms, "mass");
     this.initialEnergy = total(this.organisms, "energy");
@@ -264,17 +304,24 @@ export class World {
       const x = (patch % LIGHT_CELLS + 0.5) / LIGHT_CELLS;
       const y = (Math.floor(patch / LIGHT_CELLS) + 0.5) / LIGHT_CELLS;
       const intensity = this.incidentLightAt(x, y);
-      const share = Math.min(0.053 * intensity, 0.11 * intensity / occupants.length);
+      let requested = 0;
       for (const org of occupants) {
-        const transmitted = share * this.environment.transmissionAt(org.x, org.y);
-        incoming.set(org.id, Math.min(transmitted, 9 - org.energy));
+        const capture = 0.053 * intensity * molecularTraits(org).lightFactor *
+          this.environment.transmissionAt(org.x, org.y);
+        const demand = Math.min(capture, 9 - org.energy);
+        incoming.set(org.id, demand);
+        requested += demand;
+      }
+      const available = 0.11 * intensity;
+      if (requested > available) {
+        for (const org of occupants) incoming.set(org.id, incoming.get(org.id) * available / requested);
       }
     }
     return incoming;
   }
 
   tryFeed(org) {
-    if (org.cooldown > 0 || org.mass >= 6.4) return;
+    if (org.cooldown > 0 || org.mass >= 6.4) return false;
     let best = -1;
     let closest = Infinity;
     for (let i = 0; i < this.grains.length; i++) {
@@ -285,27 +332,34 @@ export class World {
         closest = d;
       }
     }
-    if (best < 0) return;
+    if (best < 0) return false;
     const g = this.grains[best];
     // Fully assimilate very small grains instead of creating ever finer debris.
     const waste = g.mass > 0.20 ? 0.19 * g.mass : 0;
-    const nextMass = org.mass + g.mass - waste;
+    const biomass = g.mass - waste;
+    const cost = biomass * molecularTraits(org).synthesisCost;
+    if (org.energy < cost) return false;
+    const nextMass = org.mass + biomass;
     const nextRadius = bodyRadius(nextMass);
-    if (!this.free(org.x, org.y, nextRadius, this.organisms, org)) return;
+    if (!this.free(org.x, org.y, nextRadius, this.organisms, org)) return false;
     this.grains.splice(best, 1);
+    assimilateMolecules(org, biomass);
     org.mass = nextMass;
     org.radius = nextRadius;
+    org.energy -= cost;
+    this.dissipatedEnergy += cost;
     this.addDetritus(g.x, g.y, waste);
     org.cooldown = 28;
+    return true;
   }
 
   absorbNutrient(org) {
     // The finite volume, not its interpolated display concentration, pays
     // the entire uptake. The non-assimilated fraction returns as dissolved waste.
-    const yieldFraction = 0.82;
-    const energyPerMass = 0.12;
+    const { uptakeFactor, assimilationYield: yieldFraction, synthesisCost } = molecularTraits(org);
+    const energyPerMass = yieldFraction * synthesisCost;
     const capacity = Math.max(0, (6.4 - org.mass) / yieldFraction);
-    const demand = Math.min(0.026, capacity, org.energy / energyPerMass);
+    const demand = Math.min(0.026 * uptakeFactor, capacity, org.energy / energyPerMass);
     const uptake = this.environment.take("nutrient", org.x, org.y, demand);
     if (uptake === 0) return 0;
     const biomass = yieldFraction * uptake;
@@ -314,9 +368,10 @@ export class World {
       this.environment.add("nutrient", org.x, org.y, uptake);
       return 0;
     }
-    const cost = Math.min(org.energy, uptake * energyPerMass);
+    const cost = Math.min(org.energy, biomass * synthesisCost);
     org.energy -= cost;
     this.dissipatedEnergy += cost;
+    assimilateMolecules(org, biomass);
     org.mass += biomass;
     org.radius = radius;
     this.environment.add("waste", org.x, org.y, uptake - biomass);
@@ -379,17 +434,28 @@ export class World {
       this.dissipatedEnergy += 0.48;
       const child = { ...org, id: this.nextId++, parent: org.id, x, y, angle, age: 0,
         generation: org.generation + 1, phase: this.random() * TAU, cooldown: 26,
-        activeDistance: 0, passiveDistance: 0, maxAge: 1050 + Math.floor(this.random() * 850),
+        activeDistance: 0, passiveDistance: 0, flux: { light: 0, uptake: 0 },
+        maxAge: 1050 + Math.floor(this.random() * 850),
         sensitivity: clamp(org.sensitivity + this.noise(0.07), 0.05, 1) };
+      divideMolecules(org, child, () => this.random());
       newborns.push(child);
       this.births++;
-      this.log("birth", "Organismo #" + org.id + " originou #" + child.id + ".", { id: child.id, parent: org.id });
+      let birthText = "Organismo #" + org.id + " originou #" + child.id + ".";
+      if (child.mutationDelta !== 0) {
+        const change = child.mutationDelta > 0 ? "ganhou" : "perdeu";
+        const points = (child.mutationDelta > 0 ? "+" : "−") + Math.round(Math.abs(child.mutationDelta) * 100);
+        birthText += " Por mutação, a filha " + change + " uma posição para pigmento (" + points + " pontos percentuais).";
+      }
+      this.log("birth", birthText,
+        { id: child.id, parent: org.id, allocation: child.genome.allocation, mutationDelta: child.mutationDelta });
       return;
     }
   }
 
   step() {
     this.tick++;
+    this.capturedLightLastTick = 0;
+    this.dissolvedUptakeLastTick = 0;
     this.erodeGrains();
     const remains = [];
     for (const d of this.detritus) {
@@ -422,12 +488,16 @@ export class World {
     for (let n = 0; n < this.organisms.length; n++) {
       const org = this.organisms[(start + n) % this.organisms.length];
       const incoming = energy.get(org.id);
+      org.flux.light = incoming;
+      org.flux.uptake = 0;
+      this.capturedLightLastTick += incoming;
       this.absorbedEnergy += incoming;
       org.energy += incoming;
       org.age++;
       org.cooldown--;
       const distance = this.moveOrganism(org);
-      const cost = Math.min(org.energy, 0.0058 + 0.0007 * org.mass + distance * 1.9);
+      const maintenance = molecularTraits(org).maintenance;
+      const cost = Math.min(org.energy, 0.0058 + 0.0007 * org.mass + distance * 1.9 + maintenance);
       org.energy -= cost;
       this.dissipatedEnergy += cost;
       if (org.energy <= 0.000001 || org.age >= org.maxAge) {
@@ -438,8 +508,14 @@ export class World {
         this.log("death", "Organismo #" + org.id + " retornou ao detrito (" + cause + ").", { id: org.id });
         continue;
       }
-      this.absorbNutrient(org);
-      this.tryFeed(org);
+      org.flux.uptake = this.absorbNutrient(org);
+      this.dissolvedUptakeLastTick += org.flux.uptake;
+      const ateGrain = this.tryFeed(org);
+      if (!ateGrain && org.flux.uptake < 0.003 && org.energy >= 0.3) {
+        const remodelingCost = remodelFromReserve(org);
+        org.energy -= remodelingCost;
+        this.dissipatedEnergy += remodelingCost;
+      }
       alive.push(org);
     }
     this.organisms = alive;
@@ -458,9 +534,20 @@ export class World {
     const totalMass = grainMass + bodyMass + detritusMass + water.total;
     const totalEnergy = total(this.organisms, "energy");
     let generation = 0;
-    for (const org of this.organisms) generation = Math.max(generation, org.generation);
+    let membraneMass = 0, pigmentMass = 0, transporterMass = 0, reserveMass = 0, allocation = 0;
+    for (const org of this.organisms) {
+      generation = Math.max(generation, org.generation);
+      membraneMass += org.cell.membrane;
+      pigmentMass += org.cell.pigment;
+      transporterMass += org.cell.transporters;
+      reserveMass += org.cell.reserve;
+      allocation += org.genome.allocation;
+    }
     return { tick: this.tick, population, generation, births: this.births, deaths: this.deaths,
       initialPopulation: this.initialPopulation, grainMass, bodyMass, detritusMass, totalMass,
+      membraneMass, pigmentMass, transporterMass, reserveMass,
+      meanAllocation: population ? allocation / population : null,
+      capturedLightLastTick: this.capturedLightLastTick, dissolvedUptakeLastTick: this.dissolvedUptakeLastTick,
       nutrientMass: water.nutrient, wasteMass: water.waste, meanTurbidity: water.meanTurbidity,
       recycledLastTick: this.environment.lastRecycled, nutrientInputTotal: this.nutrientInputTotal,
       maxGeneration: generation, initialEnergy: this.initialEnergy, initialMass: this.initialMass,
@@ -485,26 +572,35 @@ export class World {
   }
 
   static restore(snapshot) {
-    if (!record(snapshot) || ![1, SNAPSHOT_VERSION].includes(snapshot.version) ||
+    if (!record(snapshot) || ![1, 2, SNAPSHOT_VERSION].includes(snapshot.version) ||
         !Array.isArray(snapshot.minerals)) throw new Error("Snapshot de lagoa incompatível.");
     // A v1 world already accounts for every unit in bodies, grains and detritus.
     // Starting its water at zero preserves the material and energy at migration.
-    const migrated = snapshot.version === 1;
-    const environment = migrated ? new Environment({ minerals: snapshot.minerals }) :
+    const missingWater = snapshot.version === 1;
+    const missingMolecules = snapshot.version < SNAPSHOT_VERSION;
+    const environment = missingWater ? new Environment({ minerals: snapshot.minerals }) :
       Environment.restore(snapshot.environment, snapshot.minerals);
     if (!validCheckpoint(snapshot, environment.totals().total) ||
-        (!migrated && (environment.tick !== snapshot.tick || !validTelemetry(snapshot))))
+        (!missingWater && (environment.tick !== snapshot.tick || !validTelemetry(snapshot))))
       throw new Error("Snapshot de lagoa incompatível.");
     const state = copy(snapshot);
-    const world = Object.create(World.prototype);
+    const world = Object.create(this.prototype);
     for (const key of ["seed", "rng", "tick", "nextId", "light", "organisms", "grains", "minerals",
       "detritus", "events", "births", "deaths", "activeDistance", "passiveDistance", "absorbedEnergy",
       "dissipatedEnergy", "initialPopulation", "initialMass", "initialEnergy"]) world[key] = state[key];
     world.environment = environment;
     world.environment.tick = world.tick;
-    world.nutrientInputTotal = migrated ? 0 : state.nutrientInputTotal;
-    world.telemetry = migrated ? [] : state.telemetry;
-    if (migrated) world.recordTelemetry();
+    world.nutrientInputTotal = missingWater ? 0 : state.nutrientInputTotal;
+    world.telemetry = missingWater ? [] : state.telemetry;
+    world.molecularSinceTick = missingMolecules ? world.tick : state.molecularSinceTick;
+    world.capturedLightLastTick = missingMolecules ? 0 : state.capturedLightLastTick;
+    world.dissolvedUptakeLastTick = missingMolecules ? 0 : state.dissolvedUptakeLastTick;
+    if (missingMolecules) {
+      // Divide the already measured biomass into neutral stocks without RNG
+      // draws, external input, or retroactive molecular measurements.
+      for (const org of world.organisms) initializeMolecules(org, makeGenome(0.5));
+      world.recordTelemetry();
+    }
     return world;
   }
 }
@@ -528,6 +624,14 @@ function validTelemetry(state) {
     const tolerance = 1e-8 * Math.max(1, expected);
     if (Math.abs(stocks - sample.totalMass) > tolerance ||
         Math.abs(sample.totalMass - expected - sample.massError) > tolerance) return false;
+    if (state.version === SNAPSHOT_VERSION && sample.tick >= state.molecularSinceTick) {
+      const compartments = [sample.membraneMass, sample.pigmentMass, sample.transporterMass, sample.reserveMass];
+      if (!compartments.every(value => inRange(value, 0, sample.bodyMass + tolerance)) ||
+          Math.abs(compartments.reduce((sum, value) => sum + value, 0) - sample.bodyMass) > tolerance ||
+          (sample.population ? !inRange(sample.meanAllocation, 0, 1) : sample.meanAllocation !== null) ||
+          !inRange(sample.capturedLightLastTick, 0, sample.absorbedEnergy + tolerance) ||
+          !inRange(sample.dissolvedUptakeLastTick, 0, Number.MAX_SAFE_INTEGER)) return false;
+    }
     prev = sample.tick;
   }
   return state.tick - prev < TELEMETRY_INTERVAL;

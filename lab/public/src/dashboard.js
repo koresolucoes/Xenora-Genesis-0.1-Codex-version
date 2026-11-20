@@ -1,3 +1,5 @@
+import { mountMolecularTrial } from "./molecular-trial-panel.js";
+
 const NS = "http://www.w3.org/2000/svg";
 const HISTORY_LIMIT = 512;
 const SAMPLE_PERIOD = 10;
@@ -24,6 +26,27 @@ const groups = {
     description: "A reserva inicial somada à energia absorvida e descontada a energia dissipada resulta na reserva atual.",
     series: [["totalEnergy", "Reserva atual"], ["absorbedEnergy", "Absorção acumulada"], ["dissipatedEnergy", "Dissipação acumulada"]]
   },
+  cellStocks: {
+    label: "Compartimentos celulares", unit: "u.m. na população",
+    description: "Somas entre células vivas. Membrana, pigmento, transportadores e reserva de matéria compõem a biomassa celular.",
+    series: [["membraneMass", "Membrana"], ["pigmentMass", "Pigmento"], ["transporterMass", "Transportadores"], ["reserveMass", "Reserva de matéria"]],
+    colors: ["#dbf0c7", "#a6d94d", "#67cfca", "#daa447"]
+  },
+  investment: {
+    label: "Alocação genética", unit: "fração de 0 a 1",
+    description: "Média da fração de símbolos 1 nos polímeros dos indivíduos vivos. Cada símbolo 1 destina uma parte do investimento compartilhado ao pigmento.",
+    series: [["meanAllocation", "Alocação média a pigmento"]]
+  },
+  lightCapture: {
+    label: "Fluxo de luz captada", unit: "u.e./passo",
+    description: "Energia luminosa efetivamente captada por todos os organismos que participaram do passo amostrado.",
+    series: [["capturedLightLastTick", "Energia captada no passo"]]
+  },
+  uptake: {
+    label: "Fluxo de nutriente", unit: "u.m./passo",
+    description: "Matéria efetivamente retirada do nutriente dissolvido no passo amostrado. A série considera somente a captação de soluto.",
+    series: [["dissolvedUptakeLastTick", "Captação de nutriente dissolvido"]]
+  },
   environment: {
     label: "Meio", unit: "índice do modelo",
     description: "A turbidez média resume as condições de visibilidade no campo. Valores locais variam entre regiões.",
@@ -41,7 +64,11 @@ const csvColumns = [
   ["totalEnergy", "energia_armazenada_ue"], ["absorbedEnergy", "energia_absorvida_acumulada_ue"],
   ["dissipatedEnergy", "energia_dissipada_acumulada_ue"], ["initialEnergy", "energia_inicial_ue"],
   ["energyError", "desvio_energia_ue"], ["meanTurbidity", "turbidez_media"],
-  ["lightX", "luz_x_relativa"], ["lightY", "luz_y_relativa"]
+  ["lightX", "luz_x_relativa"], ["lightY", "luz_y_relativa"],
+  ["membraneMass", "membrana_viva_um"], ["pigmentMass", "pigmento_vivo_um"],
+  ["transporterMass", "transportadores_vivos_um"], ["reserveMass", "reserva_celular_materia_um"],
+  ["meanAllocation", "alocacao_media_a_pigmento_fracao"], ["capturedLightLastTick", "luz_captada_no_passo_ue"],
+  ["dissolvedUptakeLastTick", "nutriente_dissolvido_captado_no_passo_um"]
 ];
 
 const cards = [
@@ -108,6 +135,16 @@ export class ScienceDashboard {
         <p class="sd-description"></p>
         <p class="sd-period"></p>
       </div>
+      <section class="sd-molecules" aria-labelledby="sd-molecules-title">
+        <header><h3 id="sd-molecules-title">Metabolismo da população</h3><span data-mol-step></span></header>
+        <dl>
+          <div><dt>Alocação média a pigmento</dt><dd data-mol-allocation>—</dd></div>
+          <div><dt>Luz captada</dt><dd><span data-mol-light>—</span> <small>u.e./passo</small></dd></div>
+          <div><dt>Nutriente dissolvido captado</dt><dd><span data-mol-uptake>—</span> <small>u.m./passo</small></dd></div>
+        </dl>
+        <button type="button" class="sd-cell-history">Ver compartimentos no gráfico ↑</button>
+      </section>
+      <div id="sd-molecular-trial"></div>
       <section class="sd-trial" aria-label="Ensaio pareado">
         <div class="sd-trial-head"><div><h3>Ensaio pareado de nutrientes</h3>
           <p>Duas cópias deste passo avançam por 150 passos. Uma recebe 1 u.m. de nutrientes no centro da lagoa. A outra serve de controle.</p></div>
@@ -121,6 +158,7 @@ export class ScienceDashboard {
         </dl>
       </section>`;
     this.find = selector => this.root.querySelector(selector);
+    mountMolecularTrial(this.find("#sd-molecular-trial"), () => this.world);
     this.values = new Map();
     for (const [key, label, unit] of cards) {
       const tile = document.createElement("div");
@@ -154,6 +192,12 @@ export class ScienceDashboard {
       this.grid.append(label);
       return label;
     });
+    this.find(".sd-cell-history").addEventListener("click", () => {
+      this.chooser.value = "cellStocks";
+      this.selectGroup("cellStocks");
+      this.chooser.focus({ preventScroll: true });
+      this.find(".sd-plot-card").scrollIntoView({ block: "nearest" });
+    });
     this.chooser.addEventListener("change", () => this.selectGroup(this.chooser.value));
     this.window.addEventListener("change", () => this.draw());
     this.find("[data-export]").addEventListener("click", () => this.exportCsv());
@@ -175,7 +219,7 @@ export class ScienceDashboard {
     this.find(".sd-description").textContent = group.description;
     group.series.forEach(([name, label], index) => {
       this.visible.add(name);
-      const color = colors[index];
+      const color = (group.colors || colors)[index];
       const button = document.createElement("button");
       button.type = "button";
       button.className = "sd-legend";
@@ -245,6 +289,12 @@ export class ScienceDashboard {
     if (!this.current) return;
     this.lastPainted = this.current;
     const current = this.current;
+    put(this.find("[data-mol-step]"), "Passo " + whole.format(current.tick));
+    const average = current.population > 0 && Number.isFinite(current.meanAllocation)
+      ? number.format(current.meanAllocation * 100) + "%" : "—";
+    put(this.find("[data-mol-allocation]"), average);
+    put(this.find("[data-mol-light]"), valueText(current.capturedLightLastTick));
+    put(this.find("[data-mol-uptake]"), valueText(current.dissolvedUptakeLastTick));
     const totalMass = valueText(current.totalMass);
     const initialMass = valueText(current.initialMass);
     const details = {
@@ -310,8 +360,10 @@ export class ScienceDashboard {
     put(this.title, groups[this.group].label + " por passo de simulação, " + interval + ".");
     const origin = Array.isArray(this.world.telemetry) ? "Histórico do mundo" : "Histórico desta sessão";
     const multiple = history.length !== 1;
+    const missing = rows.some(row => this.series.some(({name}) => !Number.isFinite(row[name])));
+    const gaps = missing ? " Lacunas indicam passos sem medida disponível." : "";
     put(this.find(".sd-period"), origin + " · " + whole.format(history.length) + (multiple ? " registros" : " registro") +
-      " · Gráfico dos " + interval + ". Amostragem a cada 10 passos, com leitura do passo atual.");
+      " · Gráfico dos " + interval + ". Amostragem a cada 10 passos, com leitura do passo atual." + gaps);
   }
 
   clearTrial() {
