@@ -19,7 +19,8 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
   const pendingKey = localKey + '.outbox';
   const primordial = mode === 'primordial';
   const evolving = mode === 'evolving-world';
-  const files = primordial || evolving;
+  const particles = mode === 'particle-world';
+  const files = primordial || evolving || particles;
   root.classList.add('world-archive');
   root.innerHTML = `
     <div class="wa-head"><div><h2>Arquivo de mundos</h2><p>Salve uma revisão ou abra outro ramo para comparar sua evolução.</p></div>
@@ -32,9 +33,10 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
     <label>Ramo<select data-runs></select></label><p data-run-origin class="wa-current"></p><label>Revisão<select data-revisions></select></label>
     <div class="wa-actions"><button type="button" data-act="more" hidden>Mais revisões</button><button type="button" data-act="load">Restaurar revisão</button>
     <button type="button" data-act="fork">Bifurcar esta revisão</button></div>
-    <label>Registros desta revisão<select data-view><option value="events">Acontecimentos</option>
-    <option value="minerals">Origem dos minerais</option>
-    ${primordial ? '<option value="quantities">Inventário dos elementos</option>' : '<option value="genealogy">Genealogia observada</option>'}
+    <label>Registros desta revisão<select data-view>${particles ?
+      '<option value="quantities">Inventário dos elementos</option><option value="events">Moléculas observadas</option>' :
+      '<option value="events">Acontecimentos</option><option value="minerals">Origem dos minerais</option>' +
+      (primordial ? '<option value="quantities">Inventário dos elementos</option>' : '<option value="genealogy">Genealogia observada</option>')}
     <option value="samples">Medições do mundo</option></select></label>
     <div class="wa-actions"><button type="button" data-act="query">Consultar registros</button><button type="button" data-act="next-rows" hidden>Mais registros</button></div>
     <div data-observations class="wa-rows" aria-live="polite"></div></div>
@@ -110,7 +112,7 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
     }
     const key=newCapability(), runId=crypto.randomUUID();
     return perform(makeOperation('create',key,{mode,worldId:key.worldId,runId,checkpoint:snapshot,
-      label:(primordial ? 'Universo ' : evolving ? 'Mundo ' : 'Lagoa ') + (snapshot.seed ?? '')},runId));
+      label:(particles ? 'Mundo atômico ' : primordial ? 'Universo ' : evolving ? 'Mundo ' : 'Lagoa ') + (snapshot.seed ?? '')},runId));
   }
   function showOptions(node,items) {
     node.replaceChildren();
@@ -192,11 +194,18 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
     rowsAfter=null;q('[data-observations]').replaceChildren();action('next-rows').hidden=true;
   }
   function describe(view,row) {
+    if (particles && view==='events' && row.type==='component-observed') {
+      const d=row.data;
+      return 'Passo '+row.tick+' · '+d.formula+' · '+d.members.length+' átomos · '+d.bondCount+' ligações · '+
+        d.massU.toLocaleString('pt-BR',{maximumFractionDigits:5})+' u · IDs '+d.members.join(', ');
+    }
     if (view==='events') return 'Passo '+row.tick+' · '+(row.data?.text||row.type);
     if (view==='minerals') {
       const interval=row.inventoryScope==='source-disk' ? 'amostra no passo '+row.sourceTick+(Number.isSafeInteger(row.sampleSites)?' · '+row.sampleSites+' sítios locais':'') : 'passos '+row.firstTick+'–'+row.lastTick;
       return (row.formula||'Mineral')+' · '+Number(row.units).toLocaleString('pt-BR',{maximumFractionDigits:4})+' lotes do disco · '+(row.source==='stellar-neighborhood'?'ejeção estelar':row.source)+' · '+interval;
     }
+    if (view==='quantities' && particles) return row.symbol+' · '+row.count+' átomos · '+
+      row.massU.toLocaleString('pt-BR',{maximumFractionDigits:5})+' u';
     if (view==='quantities') return row.symbol+' · gás '+row.gas+' · mineral '+row.mineral+' · exportado '+row.exported;
     if (view==='genealogy') {
       const gene = evolving ? 'alelo térmico '+row.allele : 'fita '+row.sequence;
@@ -205,6 +214,8 @@ export function mountWorldArchive(root, {mode,getSnapshot,restoreSnapshot}) {
       return '#'+row.id+' · geração '+row.generation+' · '+(row.parentId==null?'fundador':'progenitor #'+row.parentId)+' · '+gene+evidence;
     }
     const d=row.data||{};
+    if (particles) return 'Passo '+row.tick+' · '+d.atomCount+' átomos · '+d.bondCount+
+      ' ligações · '+d.bondedComponents+' moléculas observadas';
     const values=[['population','organismos'],['scaleFactor','fator de escala'],['mineralUnits','un. de mineral'],['bodyMass','biomassa'],['cosmicTemperature','temperatura relativa'],['matterDensity','densidade relativa'],['meanTemperatureK','K'],['meanHumidity','umidade relativa'],['meanTrait','traço térmico médio'],['mutations','mutações']]
       .filter(([key])=>Number.isFinite(d[key])).map(([key,label])=>d[key].toLocaleString('pt-BR',{maximumFractionDigits:3})+' '+label);
     return 'Passo '+row.tick+(values.length?' · '+values.join(' · '):' · medição arquivada');

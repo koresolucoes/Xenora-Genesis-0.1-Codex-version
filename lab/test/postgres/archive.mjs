@@ -1,4 +1,5 @@
 import { EvolvingWorld } from "../../public/src/evolving-world.js";
+import { AtomicWorld } from "../../public/src/atomic-world.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { main } from "./local-pg.mjs";
@@ -326,10 +327,15 @@ await main(async ({ admin, connect, schema }) => {
   // Upgrade an archive which already contains genuine revisions and capability hashes.
   await schema("migrations/001-evolving-world.sql");
   await schema("migrations/001-evolving-world.sql");
+  await schema("migrations/002-particle-world.sql");
+  await schema("migrations/002-particle-world.sql");
+  await schema("migrations/003-atomic-world.sql");
+  await schema("migrations/003-atomic-world.sql");
   const models = {
     primordial: new PrimordialWorld({ seed: 42 }),
     "lagoon-molecular": new World(42),
-    "evolving-world": new EvolvingWorld(42)
+    "evolving-world": new EvolvingWorld(42),
+    "particle-world": new AtomicWorld(42)
   };
   for (const [mode, model] of Object.entries(models)) {
     for (let i = 0; i < 360; i++) model.step();
@@ -352,6 +358,16 @@ await main(async ({ admin, connect, schema }) => {
       worldId,
     );
     assert.deepEqual(restored.checkpoint, projected.checkpoint);
+    if (mode === "particle-world") {
+      assert.equal(restored.coverage.sampleBasis,"validated checkpoint tick");
+      const next={...observations,runId,expectedRevision:1,mode,engineVersion};
+      await rejected(write(owner,"append",{...next,quantities:[]},randomUUID(),worldId),"PT400");
+      await rejected(write(owner,"append",{...next,genealogy:[{id:1}]},randomUUID(),worldId),"PT400");
+      const forkRun=randomUUID();
+      await write(owner,"fork",{run:{id:forkRun},parentRunId:runId,parentRevision:1},randomUUID(),worldId);
+      const fork=await read(owner,{view:"checkpoint",runId:forkRun},capability,worldId);
+      assert.deepEqual(fork.checkpoint,restored.checkpoint);
+    }
     const replay = model.constructor.restore(restored.checkpoint);
     replay.step();
     model.step();

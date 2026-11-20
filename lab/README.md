@@ -1,24 +1,40 @@
-# Xenora · Observatório de mundos
+# Xenora · Matéria em organização
 
-A partir da pasta `lab/`, abra o laboratório servindo a pasta `public` com `python3 -m http.server 8000 --bind 127.0.0.1 --directory public` e acesse `http://localhost:8000`. A simulação e os checkpoints locais funcionam em hospedagem estática.
+A entrada `/` executa um único microdomínio de átomos neutros dispersos de H, C, N, O, P e S. Cada átomo tem ID, elemento, isótopo, massa, posição e energia. As moléculas são componentes das ligações entre esses mesmos IDs. O estado inicial tem zero ligações.
 
-Para repetir um experimento, use a mesma semente e mova a luz nos mesmos passos. O arquivo JSON de checkpoint permite retomar o estado do mundo, incluindo o gerador pseudoaleatório. O laboratório começa com organismos digitais programados. Matéria e energia são medidas em unidades arbitrárias próprias da simulação.
+A partir de `lab/`, execute `npm ci` e `npm test`. Para explorar a interface local, sirva `public/` com `python3 -m http.server 8000 --bind 127.0.0.1 --directory public`.
 
-Execute `npm test` na pasta `lab/` para verificar o replay, a conservação da matéria e a rejeição de checkpoints inválidos com o executor de testes do Node.js 22 ou superior.
+## Fundamentos materiais
 
-## Mundo evolutivo
+`atomic-elements.js` registra número atômico, prótons, nêutrons, elétrons, massa isotópica, raio covalente de referência e limite de valência. As fontes são NIST, Cordero et al. e OpenStax. Os núcleos conservam a identidade. Os quarks de valência dos núcleons aparecem como composição de referência. Suas interações nucleares requerem outra escala de modelo.
 
-A rota principal abre o mapa de uma superfície planetária em evolução. A sonda consulta as reservas do solo, a água, a temperatura e os organismos do ponto selecionado. As camadas usam os campos do motor. A ampliação de 1× a 4× permite inspecionar o terreno e os indivíduos. Em **Mundo**, a sonda e o campo usam a mesma seleção. **Experimentos de origem e de química** reúne os instrumentos opcionais. Os endereços anteriores de Origens e da lagoa molecular abrem esses instrumentos no próprio observatório. Uma amostra transferida a partir da condensação mineral mantém a procedência.
+O grafo químico usa ligações covalentes simplificadas com ordens permitidas e energias médias de dissociação. Ele conserva elementos, núcleos e elétrons. Cada componente informa fórmula, massa e constituintes. A fórmula bruta permite consultar a composição. A identificação de uma substância exige também sua estrutura e distribuição eletrônica.
 
-Em **Variáveis**, a luz incide sobre o planeta e um pulso de nutriente entra na célula selecionada pela sonda. A tabela compara as leituras de ambos no mesmo passo. O botão **+50 passos** permite observar o estado futuro mantendo o mundo em foco.
+A interface mede volume do recipiente, massa e densidade. A comparação de pressão do gás ideal usa o número de componentes moleculares independentes. O raio covalente define um volume geométrico de referência para cada átomo. O volume de uma amostra depende também do arranjo e das condições físicas. A fase macroscópica permanece sem classificação até que um modelo de interação e equilíbrio valide essa análise.
 
-Os habitats resultam das condições de cada região. A água pode mudar de fase e as condições podem favorecer gelo, terreno seco ou lâminas de água. Nos mundos com fundadores, os recursos e o desempenho fisiológico de cada indivíduo afetam a reprodução. Um alelo térmico é copiado durante a divisão e pode sofrer mutação. A aba **Evolução** mostra a distribuição dos onze alelos e as famílias sobreviventes. Na mesma aba, o controle neutro permite repetir uma trajetória com o efeito fisiológico do alelo desligado para medir a variação de frequências por outros mecanismos, incluindo a deriva.
+A integração usa partículas clássicas e potenciais efetivos. Um corretor da energia cinética fecha o saldo numérico e registra a correção acumulada. O calor liberado ou absorvido nas mudanças de ligação é acompanhado em um reservatório explícito de reação. A alteração do volume reescala as posições e registra a mudança de potencial como trabalho. Esses mecanismos permitem verificar a contabilidade. Previsões quantitativas de cinética ou propriedades de substâncias exigem validação adicional do modelo.
 
-Na aba **Aprendizagem**, a ação é ficar no sítio ou explorar um vizinho. O contexto distingue dois níveis locais de nutriente. O saldo de energia e a matéria assimilada após a ação atualizam a memória daquele indivíduo. Cada descendente começa com memória vazia. O ensaio duplica o mundo em foco, zera a memória individual nos dois ramos e compara 240 passos com aprendizagem ligada ou desligada. As taxas usam as decisões observadas em cada contexto. Também é possível baixar a tabela em CSV. A partir de `lab/`, execute `node test/experiments/evolving-selection.mjs` para o ensaio de seleção ou `node test/experiments/evolving-learning.mjs` para a comparação de aprendizagem em várias sementes.
+## Um motor e uma observação
 
-Em **Mundos e ramos**, até quatro execuções locais podem ser acompanhadas em paralelo, inclusive dois ramos da mesma população sob intensidades de luz diferentes. A árvore identifica a execução de origem e o passo de cada ramificação. **Revisões salvas**, em **Mundo**, abre o arquivo remoto do Supabase. A sessão local do mundo em foco preserva pausa e velocidade. Ao reabrir uma execução, o navegador simula até 2.400 passos decorridos. O relógio do mundo só avança quando o motor executa seus passos.
+`atomic-world.js` implementa a dinâmica do mundo. As operações do observador não criam estruturas e não alteram as forças. Uma ligação muda a composição do componente molecular. Movimento, compressão do recipiente e troca de calor alteram as condições físicas. As alterações da fonte e do recipiente têm contabilização explícita.
 
-## Experimentos na água
+A cena permite selecionar átomos, ligações e moléculas no mesmo passo. Os controles alteram condições do mesmo mundo. O inventário e o arquivo usam o formato `particle-world`, versão 2, com identidade do motor `particle-world-v2`. A sessão local e os ramos preservam seus constituintes.
+
+Para atualizar um banco que já aplicou a migração 002, aplique `migrations/003-atomic-world.sql`. Instalações novas usam `schema-supabase.sql` e `schema-origins.sql`.
+
+## Limite científico atual
+
+O objetivo é estudar a formação de estruturas materiais que possam sustentar manutenção, reprodução e herança. O núcleo atual trata formação e transformação de moléculas no seu modelo reduzido. Para demonstrar organismos surgindo desse substrato, ainda é necessário obter compartimentação funcional, metabolismo acoplado e reprodução sustentada. As evidências de cada etapa devem vir das trajetórias dos mesmos átomos.
+
+## Recuperação de registros anteriores
+
+`/recovery.html` lê arquivos ou revisões dos modelos anteriores e permite baixar o JSON. Esses registros identificam a versão e o tipo de experimento que os gerou. Os endereços anteriores de cosmologia e lagoa levam a essa recuperação. As implementações anteriores permanecem versionadas como experimentos de cronologia, agregação ou populações introduzidas.
+
+## Experimentos anteriores de lagoa
+
+As seções seguintes documentam o acervo anterior, preservado para testes e leitura de registros. A entrada principal usa o núcleo atômico.
+
+### Experimentos na água
 
 A água é um campo de volumes finitos de 24 × 24 células. O mundo mede uma unidade de lado (L), e o relógio avança em passos (T). As massas de soluto são medidas em unidades de matéria (M). A sonda mostra concentração superficial em M/L². As camadas de corrente, luz, resíduos e nutrientes usam o estado que também determina as interações dos organismos.
 
@@ -49,7 +65,7 @@ Na época de lagoa, um domínio local representa a superfície com 120 partícul
 
 ## Arquivo científico no Supabase
 
-Em instalações novas, aplique `schema-supabase.sql` e em seguida `schema-origins.sql`, no mesmo projeto. Para um arquivo já instalado na versão anterior, `migrations/001-evolving-world.sql` habilita o mundo evolutivo e preserva mundos, chaves e revisões existentes. O arquivo usa o gateway privado já configurado. Na interface de cada laboratório, **Salvar revisão** cria um mundo e um ramo ou acrescenta uma revisão à execução aberta. Em **Chave e histórico de revisões**, copie a chave para poder recuperar o mundo em outro navegador, abra um passo anterior e bifurque o ramo. A chave concede leitura e escrita nesse mundo. Uma chave anterior de checkpoint continua válida na opção **Experimento** da lagoa.
+Em instalações novas, aplique `schema-supabase.sql` e em seguida `schema-origins.sql`, no mesmo projeto. Em arquivos existentes, aplique as migrações pendentes em ordem. `migrations/001-evolving-world.sql` habilita o mundo evolutivo. `migrations/002-particle-world.sql` acrescenta o mundo de partículas e preserva mundos, chaves e revisões. A migração `migrations/003-atomic-world.sql` acrescenta o motor atômico v2 ao mesmo modo. Cada revisão v2 registra o inventário H, C, N, O, P e S, a massa em unidades atômicas e as fórmulas dos componentes ligados no passo salvo. O histórico de medições pode ser consultado entre revisões. O arquivo usa o gateway privado já configurado. Na interface de cada laboratório, **Salvar revisão** cria um mundo e um ramo ou acrescenta uma revisão à execução aberta. Em **Chave e histórico de revisões**, copie a chave para poder recuperar o mundo em outro navegador, abra um passo anterior e bifurque o ramo. A chave concede leitura e escrita nesse mundo. Uma chave anterior de checkpoint continua válida na opção **Experimento** da lagoa.
 
 As rotas sob `/api/worlds` aceitam os modos `primordial` e `lagoon-molecular`. O cliente gera os identificadores e o segredo do mundo antes do envio. A escrita usa um identificador de operação estável e a revisão esperada. O Worker restaura o estado, calcula as observações e envia o lote. O PostgreSQL arquiva a revisão e o recibo em uma transação. Uma repetição idêntica recebe o mesmo recibo, e uma escrita obsoleta recebe HTTP 409. Um fork copia o estado e as observações da revisão de origem. Uma revisão pode ser consultada independentemente do ramo corrente.
 

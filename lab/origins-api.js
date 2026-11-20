@@ -3,7 +3,7 @@ import { projectSnapshot } from "./origins-projection.js";
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isId = value => typeof value === "string" && uuidPattern.test(value);
 const pages = new Set(["revisions", "events", "samples", "minerals", "quantities", "genealogy"]);
-const modes = new Set(["primordial", "lagoon-molecular", "evolving-world"]);
+const modes = new Set(["primordial", "lagoon-molecular", "evolving-world", "particle-world"]);
 
 function matchesShape(object, allowed) {
   return object && typeof object === "object" && !Array.isArray(object)

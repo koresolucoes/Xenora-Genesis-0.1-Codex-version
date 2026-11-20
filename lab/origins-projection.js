@@ -1,13 +1,15 @@
 import { World, validEventIndividual } from "./public/src/engine.js";
 import { EvolvingWorld } from "./public/src/evolving-world.js";
 import { PRIMORDIAL_MODEL, PrimordialWorld } from "./public/src/primordial.js";
+import { AtomicWorld } from "./public/src/atomic-world.js";
 
 // Archive model identities are independent of the saved JSON format.
 // Advance the appropriate identifier when evolution or numerical rules change.
 const MODEL_VERSIONS = Object.freeze({
   "lagoon-molecular": "lagoon-molecular-v3",
   primordial: "primordial-v1",
-  "evolving-world": "evolving-world-v1"
+  "evolving-world": "evolving-world-v1",
+  "particle-world": "particle-world-v2"
 });
 
 const molecularMeasurements = [
@@ -221,10 +223,39 @@ function projectEvolving(checkpoint) {
   };
 }
 
+function projectAtomic(checkpoint) {
+  const world=AtomicWorld.restore(checkpoint);
+  const stocks=new Map(["C","H","N","O","P","S"].map(symbol=>[symbol,{symbol,count:0,massU:0}]));
+  let protons=0, neutrons=0, electrons=0;
+  for(const atom of world.particles) {
+    const stock=stocks.get(atom.element);
+    if(!stock || !Number.isFinite(atom.massU) || atom.massU<=0) throw new Error("Elemento atômico inválido.");
+    stock.count++; stock.massU+=atom.massU;
+    protons+=atom.protons; neutrons+=atom.neutrons; electrons+=atom.electrons;
+  }
+  const events=world.molecules().filter(component=>component.members.length>1).map(component=>{
+    const members=[...component.members].sort((a,b)=>a-b);
+    return {tick:world.tick,type:"component-observed",key:"component-"+members[0],
+      data:{formula:component.formula,members,massU:component.massU,bondCount:component.bondCount}};
+  });
+  const data={atomCount:world.particles.length,bondCount:world.bonds.length,bondedComponents:events.length,
+    massU:[...stocks.values()].reduce((sum,stock)=>sum+stock.massU,0),protons,neutrons,electrons,
+    ...numbers(world.getMetrics(),["timeFs","temperatureK","targetTemperatureK","volumeNm3","densityKgM3","pressurePa",
+      "idealPressurePa","kineticEnergyEv","potentialEnergyEv","totalEnergyEv","initialEnergyEv","bathWorkEv",
+      "volumeWorkEv","reactionHeatEv","initialMassU","massError","energyError",
+      "netCharge","distinctFormulas","ringMolecules","largestMoleculeAtoms"])};
+  return {checkpoint:world.serialize(),engineVersion:MODEL_VERSIONS["particle-world"],
+    samples:[{tick:world.tick,data}],quantities:[...stocks.values()],events,minerals:[],genealogy:[]};
+}
+
 export function projectSnapshot(mode, checkpoint) {
   if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)) throw new TypeError("Checkpoint inválido");
   if (mode === "lagoon-molecular") return projectMolecular(checkpoint);
   if (mode === "primordial") return projectPrimordial(checkpoint);
   if (mode === "evolving-world") return projectEvolving(checkpoint);
+  if (mode === "particle-world") {
+    if (checkpoint.version !== 2 || checkpoint.mode !== mode || checkpoint.kind !== mode) throw new TypeError("Versão atômica incompatível");
+    return projectAtomic(checkpoint);
+  }
   throw new TypeError("Modo desconhecido");
 }

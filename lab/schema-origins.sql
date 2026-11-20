@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS xenora_private.science_runs (
 -- Refresh the constraint as CREATE TABLE IF NOT EXISTS also covers older archives.
 ALTER TABLE xenora_private.science_runs DROP CONSTRAINT IF EXISTS science_runs_mode_check;
 ALTER TABLE xenora_private.science_runs ADD CONSTRAINT science_runs_mode_check
-    CHECK (mode IN ('primordial','lagoon-molecular','evolving-world'));
+    CHECK (mode IN ('primordial','lagoon-molecular','evolving-world','particle-world'));
 
 CREATE TABLE IF NOT EXISTS xenora_private.science_revisions (
     world_id uuid NOT NULL,
@@ -284,6 +284,83 @@ BEGIN
 END;
 $$;
 
+-- Validate aggregates against the persisted atoms and graph. Atomic masses are
+-- floating-point model values; sub-micro-unit rounding is permitted.
+CREATE OR REPLACE FUNCTION xenora_private.validate_atomic_projection(c jsonb,b jsonb)
+RETURNS void LANGUAGE plpgsql SET search_path='' AS $$
+DECLARE atom_total integer; edge_count integer; sample jsonb; bad boolean;
+BEGIN
+    IF jsonb_typeof(c->'particles') IS DISTINCT FROM 'array' OR jsonb_typeof(c->'bonds') IS DISTINCT FROM 'array'
+       OR b->'genealogy' IS DISTINCT FROM '[]'::jsonb OR b->'minerals' IS DISTINCT FROM '[]'::jsonb
+       OR jsonb_typeof(b->'samples') IS DISTINCT FROM 'array' OR jsonb_typeof(b->'quantities') IS DISTINCT FROM 'array'
+       OR jsonb_typeof(b->'events') IS DISTINCT FROM 'array' THEN
+        RAISE EXCEPTION 'Missing atomic state or unsupported observations' USING ERRCODE='PT400';
+    END IF;
+    atom_total:=jsonb_array_length(c->'particles'); edge_count:=jsonb_array_length(c->'bonds');
+    sample:=b#>'{samples,0,data}';
+    IF jsonb_array_length(b->'samples')<>1 OR b#>'{samples,0,tick}' IS DISTINCT FROM c->'tick'
+       OR sample->'atomCount' IS DISTINCT FROM to_jsonb(atom_total) OR sample->'bondCount' IS DISTINCT FROM to_jsonb(edge_count)
+       OR sample->'bondedComponents' IS DISTINCT FROM to_jsonb(jsonb_array_length(b->'events'))
+       OR jsonb_array_length(b->'quantities')<>6 OR jsonb_array_length(b->'events')>atom_total/2 THEN
+        RAISE EXCEPTION 'Atomic observation counts do not match checkpoint' USING ERRCODE='PT400';
+    END IF;
+    IF EXISTS (SELECT FROM jsonb_array_elements(c->'particles') a
+        WHERE coalesce(a->>'element','') NOT IN ('H','C','N','O','P','S')
+           OR jsonb_typeof(a->'massU') IS DISTINCT FROM 'number' OR (a->>'massU')::numeric<=0)
+    THEN RAISE EXCEPTION 'Invalid atomic material' USING ERRCODE='PT400'; END IF;
+
+    WITH expected AS (
+        SELECT e.symbol,count(a) AS n,coalesce(sum((a->>'massU')::numeric),0) AS mass
+        FROM (VALUES ('H'),('C'),('N'),('O'),('P'),('S')) e(symbol)
+        LEFT JOIN jsonb_array_elements(c->'particles') a ON a->>'element'=e.symbol GROUP BY e.symbol
+    ), reported AS (SELECT q->>'symbol' symbol,q FROM jsonb_array_elements(b->'quantities') q)
+    SELECT EXISTS(SELECT FROM expected e FULL JOIN reported r USING(symbol)
+        WHERE e.symbol IS NULL OR r.q IS NULL OR r.q->'count' IS DISTINCT FROM to_jsonb(e.n)
+           OR jsonb_typeof(r.q->'massU') IS DISTINCT FROM 'number'
+           OR abs((r.q->>'massU')::numeric-e.mass)>0.000000001*greatest(1,e.mass)) INTO bad;
+    IF bad THEN RAISE EXCEPTION 'Atomic inventory does not match checkpoint' USING ERRCODE='PT400'; END IF;
+
+    -- Start from each reported molecule and traverse the actual bonds. The
+    -- member ids must match that entire connected component; every bonded
+    -- atom must be covered exactly once. Unbonded atoms belong to the stock.
+    WITH RECURSIVE atoms AS (
+        SELECT (a->>'id')::integer id,a->>'element' symbol,(a->>'massU')::numeric mass FROM jsonb_array_elements(c->'particles') a
+    ), edges AS (
+        SELECT (v->>'a')::integer a,(v->>'b')::integer b FROM jsonb_array_elements(c->'bonds') v
+    ), connected AS (SELECT e.a,e.b FROM edges e UNION ALL SELECT e.b,e.a FROM edges e),
+    reported AS (
+        SELECT (r#>>'{data,members,0}')::integer root,r FROM jsonb_array_elements(b->'events') r
+    ), reach(root,id) AS (
+        SELECT root,root FROM reported UNION SELECT w.root,e.b FROM reach w JOIN connected e ON e.a=w.id
+    ), groups AS (
+        SELECT w.root,array_agg(a.id ORDER BY a.id) members,sum(a.mass) mass
+        FROM reach w JOIN atoms a ON a.id=w.id GROUP BY w.root
+    ), element_counts AS (
+        SELECT w.root,a.symbol,count(*) n FROM reach w JOIN atoms a ON a.id=w.id GROUP BY w.root,a.symbol
+    ), labeled AS (
+        SELECT *,bool_or(symbol='C') OVER(PARTITION BY root) has_carbon FROM element_counts
+    ), formulae AS (
+        SELECT root,string_agg(symbol||CASE WHEN n=1 THEN '' ELSE n::text END,''
+            ORDER BY CASE WHEN has_carbon AND symbol='C' THEN 0 WHEN has_carbon AND symbol='H' THEN 1 ELSE 2 END,symbol COLLATE "C") formula
+        FROM labeled GROUP BY root
+    ), totals AS (
+        SELECT w.root,count(*) n FROM reach w JOIN edges e ON e.a=w.id GROUP BY w.root
+    )
+    SELECT EXISTS(SELECT FROM reported p LEFT JOIN groups g USING(root) LEFT JOIN formulae f USING(root) LEFT JOIN totals t USING(root)
+        WHERE g.root IS NULL OR t.n IS NULL OR cardinality(g.members)<2 OR g.members[1]<>p.root
+           OR p.r->>'type' IS DISTINCT FROM 'component-observed' OR p.r->>'key' IS DISTINCT FROM 'component-'||p.root::text
+           OR p.r->'tick' IS DISTINCT FROM c->'tick' OR p.r#>'{data,members}' IS DISTINCT FROM to_jsonb(g.members)
+           OR p.r#>>'{data,formula}' IS DISTINCT FROM f.formula OR p.r#>'{data,bondCount}' IS DISTINCT FROM to_jsonb(t.n)
+           OR jsonb_typeof(p.r#>'{data,massU}') IS DISTINCT FROM 'number'
+           OR abs((p.r#>>'{data,massU}')::numeric-g.mass)>0.000000001*greatest(1,g.mass))
+        OR (SELECT count(*) FROM reach)<>(SELECT count(DISTINCT a) FROM connected)
+        OR (SELECT count(*) FROM reported)<>(SELECT count(DISTINCT root) FROM reported)
+        INTO bad;
+    IF bad THEN RAISE EXCEPTION 'Observed molecule does not match atomic bonds' USING ERRCODE='PT400'; END IF;
+END;
+$$;
+REVOKE ALL ON FUNCTION xenora_private.validate_atomic_projection(jsonb,jsonb) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION public.xenora_gateway_write_science(
     p_world uuid,p_hash text,p_request uuid,p_action text,p_body jsonb
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -321,7 +398,7 @@ BEGIN
     IF p_action='create' THEN
         IF NOT COALESCE(added,false) THEN RAISE EXCEPTION 'World already exists' USING ERRCODE='PT409'; END IF;
         rid:=(p_body#>>'{run,id}')::uuid;
-        IF rid IS NULL OR COALESCE(p_body#>>'{run,mode}','') NOT IN ('primordial','lagoon-molecular','evolving-world')
+        IF rid IS NULL OR COALESCE(p_body#>>'{run,mode}','') NOT IN ('primordial','lagoon-molecular','evolving-world','particle-world')
            OR length(COALESCE(p_body#>>'{run,engineVersion}','')) NOT BETWEEN 1 AND 160 THEN
             RAISE EXCEPTION 'Missing run identity, mode or engine version' USING ERRCODE='PT400';
         END IF;
@@ -365,7 +442,52 @@ BEGIN
     IF jsonb_typeof(checked) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'Missing checkpoint object' USING ERRCODE='PT400';
     END IF;
+    IF r.mode='particle-world' AND (
+       checked->>'mode' IS DISTINCT FROM 'particle-world' OR checked->>'kind' IS DISTINCT FROM 'particle-world'
+       OR NOT ((checked->'version' IS NOT DISTINCT FROM '1'::jsonb AND r.engine_version='particle-world-v1')
+               OR (checked->'version' IS NOT DISTINCT FROM '2'::jsonb AND r.engine_version='particle-world-v2'))
+       OR jsonb_typeof(checked->'seed') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(checked->'particles') IS DISTINCT FROM 'array'
+       OR jsonb_typeof(checked->'bonds') IS DISTINCT FROM 'array') THEN
+        RAISE EXCEPTION 'Invalid particle-world v1 checkpoint' USING ERRCODE='PT400';
+    END IF;
+    IF r.engine_version='particle-world-v1' AND r.mode='particle-world' AND p_action<>'fork' AND (
+       p_body->'genealogy' IS DISTINCT FROM '[]'::jsonb OR p_body->'minerals' IS DISTINCT FROM '[]'::jsonb
+       OR p_body->'events' IS DISTINCT FROM '[]'::jsonb
+       OR jsonb_typeof(p_body->'samples') IS DISTINCT FROM 'array'
+       OR jsonb_typeof(p_body->'quantities') IS DISTINCT FROM 'array') THEN
+        RAISE EXCEPTION 'Missing particle-world measurements or unsupported projection' USING ERRCODE='PT400';
+    END IF;
+    IF r.engine_version='particle-world-v1' AND r.mode='particle-world' AND p_action<>'fork' THEN
+        IF jsonb_array_length(p_body->'samples')<>1 OR p_body#>'{samples,0,tick}' IS DISTINCT FROM checked->'tick'
+           OR p_body#>'{samples,0,data,particleCount}' IS DISTINCT FROM to_jsonb(jsonb_array_length(checked->'particles'))
+           OR p_body#>'{samples,0,data,bondCount}' IS DISTINCT FROM to_jsonb(jsonb_array_length(checked->'bonds')) THEN
+            RAISE EXCEPTION 'Particle measurement does not match checkpoint' USING ERRCODE='PT400';
+        END IF;
+        IF p_body->'quantities' IS DISTINCT FROM (
+            WITH counts AS (
+                SELECT p->>'kind' AS kind,p->>'state' AS state,count(*) AS n
+                FROM jsonb_array_elements(checked->'particles') AS p GROUP BY 1,2
+            ), stocks AS (
+                SELECT material.kind,sum(coalesce(counts.n,0)) AS n,
+                       jsonb_object_agg(material.state,coalesce(counts.n,0)) AS states
+                FROM (VALUES ('F','F'),('F','A'),('P','P'),('P','L'),('T','T')) AS material(kind,state)
+                LEFT JOIN counts USING(kind,state) GROUP BY material.kind
+            )
+            SELECT jsonb_agg(jsonb_build_object('symbol',kind,'count',n,'states',states) ORDER BY kind) FROM stocks
+        ) OR EXISTS (
+            SELECT FROM jsonb_array_elements(checked->'particles') AS p
+            WHERE (p->>'kind',p->>'state') NOT IN (('F','F'),('F','A'),('P','P'),('P','L'),('T','T'))
+               OR p->>'kind' IS NULL OR p->>'state' IS NULL
+        ) THEN
+            RAISE EXCEPTION 'Particle inventory does not match checkpoint' USING ERRCODE='PT400';
+        END IF;
+    END IF;
+    IF r.mode='particle-world' AND r.engine_version='particle-world-v2' AND p_action<>'fork' THEN
+        PERFORM xenora_private.validate_atomic_projection(checked,p_body);
+    END IF;
     IF (CASE WHEN checked->>'kind'='primordial' THEN 'primordial'
+             WHEN checked->>'kind'='particle-world' AND checked->>'mode'='particle-world' THEN 'particle-world'
              WHEN checked->>'mode'='evolving-world' THEN 'evolving-world'
              WHEN NOT (checked ? 'kind' OR checked ? 'mode') THEN 'lagoon-molecular'
         END) IS DISTINCT FROM r.mode THEN
@@ -384,6 +506,13 @@ BEGIN
         WHERE world_id=p_world AND run_id=pid AND revision=src_rev ORDER BY id;
     ELSE
         cov:=xenora_private.science_project(p_world,rid,rev,r.mode,t,checked,p_body);
+        IF r.mode='particle-world' AND r.engine_version='particle-world-v2' THEN
+            cov:=cov||jsonb_build_object('genealogyBasis','not projected in atomic version 2',
+                'sampleBasis','validated checkpoint tick','eventBasis','connected molecules observed at checkpoint tick');
+        ELSIF r.mode='particle-world' THEN
+            cov:=cov||jsonb_build_object('genealogyBasis','not projected in particle-world-v1',
+                'sampleBasis','validated checkpoint tick','eventBasis','past events not independently replayed');
+        END IF;
     END IF;
     UPDATE xenora_private.science_revisions SET coverage=cov WHERE world_id=p_world AND run_id=rid AND revision=rev;
     UPDATE xenora_private.science_runs SET head=rev WHERE world_id=p_world AND id=rid;

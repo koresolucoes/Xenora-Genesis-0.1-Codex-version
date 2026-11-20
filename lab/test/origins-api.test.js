@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import app from "../worker.js";
 import { World } from "../public/src/engine.js";
 import { EvolvingWorld } from "../public/src/evolving-world.js";
+import { AtomicWorld } from "../public/src/atomic-world.js";
 import { evolutionarySurfaceSample } from "../public/src/evolving-environment.js";
 import { PrimordialWorld } from "../public/src/primordial.js";
 
@@ -241,4 +242,35 @@ test("an evolving-world checkpoint archives the habitat, behavior and heritable 
   assert.equal(archived.minerals[0].sampleSites,primordial.lagoon.sites.length);
   assert.equal((await save({...body, mode:"primordial"})).status,422);
   assert.equal((await save({...body, checkpoint:{...snapshot, tick:-1}})).status,422);
+});
+
+test("atomic archive reports elemental stocks and measured connected components without inferring genealogy", async t=>{
+  const world=new AtomicWorld(42);
+  for(let i=0;i<24;i++)world.step();
+  let saved;
+  t.mock.method(globalThis,"fetch",async (_url,options)=>{
+    saved=JSON.parse(options.body).p_body;
+    return Response.json({revision:1});
+  });
+  const input={mode:"particle-world",worldId:randomUUID(),runId:randomUUID(),checkpoint:world.serialize()};
+  const save=body=>app.fetch(request("",{method:"POST",token:"b".repeat(64),operation:randomUUID(),body}),env);
+  assert.equal((await save(input)).status,201);
+  assert.equal(saved.run.engineVersion,"particle-world-v2");
+  assert.deepEqual(saved.checkpoint,input.checkpoint);
+  assert.deepEqual(saved.genealogy,[]);
+  assert.equal(saved.samples[0].data.atomCount,world.particles.length);
+  assert.equal(saved.samples[0].data.bondCount,world.bonds.length);
+  assert.deepEqual(saved.quantities.map(q=>q.symbol),["C","H","N","O","P","S"]);
+  for(const stock of saved.quantities){
+    const atoms=world.particles.filter(a=>a.element===stock.symbol);
+    assert.equal(stock.count,atoms.length);
+    assert.equal(stock.massU,atoms.reduce((s,a)=>s+a.massU,0));
+  }
+  const observed=world.molecules().filter(m=>m.members.length>1);
+  assert.deepEqual(saved.events.map(e=>[e.tick,e.data.formula,e.data.members]),observed.map(m=>[world.tick,m.formula,[...m.members].sort((a,b)=>a-b)]));
+  assert.equal((await save({...input,checkpoint:{...input.checkpoint,version:1}})).status,422);
+  const broken=structuredClone(input);
+  broken.checkpoint.particles[0].element="Q";
+  assert.equal((await save(broken)).status,422);
+  assert.equal((await save({...input,quantities:[]})).status,400);
 });
