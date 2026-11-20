@@ -87,7 +87,8 @@ async function supabaseRpc(env, name, params) {
     method: "POST",
     headers,
     body: JSON.stringify(params),
-    redirect: "error"
+    // Workers supports manual redirects. Reject the 3xx below without forwarding credentials.
+    redirect: "manual"
   });
   if (!response.ok) throw new Error("Supabase indisponível");
   return response;
