@@ -1,0 +1,12 @@
+[package]
+name = "xenora-simulation-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "xenora_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xenora-genesis"
+path = "src/main.rs"
