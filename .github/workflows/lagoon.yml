@@ -28,3 +28,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build:sites
+      - name: Arquivo científico em PostgreSQL
+        working-directory: lab/test/postgres
+        run: |
+          npm ci
+          npm test

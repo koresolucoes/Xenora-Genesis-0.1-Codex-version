@@ -1,3 +1,5 @@
+import { getSurfaceTransfer } from './surface-link.js';
+import { mountWorldArchive } from './world-archive.js';
 import { World } from './engine.js';
 import { LagoonView } from './render.js';
 import { ScienceDashboard } from './dashboard.js';
@@ -118,7 +120,8 @@ function selectEntity(next, point = null) {
   dirty = true;
 }
 
-function replaceWorld(next, play = false) {
+function replaceWorld(next, play = false, archiveRestore = false) {
+  if (!archiveRestore) archive.detach();
   world = next;
   selected = firstSelection(next);
   seedInput.value = String(next.seed);
@@ -248,7 +251,7 @@ function renderEvents() {
 function renderPanels() {
   dashboard.update(world);
   const metrics = world.getMetrics();
-  setText('field-name', 'Lagoa ' + String(world.seed).padStart(3, '0'));
+  setText('field-name', (world.originSample ? 'Amostra de superfície ' : 'Lagoa ') + String(world.seed).padStart(3, '0'));
   setText('tick', String(metrics.tick).padStart(4, '0'));
   setText('population', metrics.population);
   setText('grain-count', world.grains.length);
@@ -547,10 +550,26 @@ byId('copy-key')?.addEventListener('click', async () => {
   }
 });
 
+const archive = mountWorldArchive(byId('world-archive'), {
+  mode: 'lagoon-molecular',
+  getSnapshot: () => world.serialize(),
+  restoreSnapshot: snapshot => replaceWorld(World.restore(snapshot), false, true)
+});
+
 document.addEventListener('visibilitychange', () => { lastFrame = null; elapsed = 0; });
 const resize = new ResizeObserver(() => { dirty = true; });
 resize.observe(canvas);
 if (byId('specimen-canvas')) resize.observe(byId('specimen-canvas'));
+try {
+  const transfer = getSurfaceTransfer();
+  if (transfer) {
+    replaceWorld(World.fromSurfaceSample(transfer.sample), false);
+    const originLink = document.querySelector('.origin-nav');
+    originLink.href = './primordial.html?origem=' + encodeURIComponent(transfer.id);
+    originLink.textContent = 'Voltar à origem';
+    announce('Uma célula virtual foi introduzida nesta amostra de superfície.', 6500);
+  }
+} catch (error) { announce(error.message); }
 dashboard.reset(world);
 seedInput.value = String(world.seed);
 byId('flash')?.setAttribute('role', 'status');

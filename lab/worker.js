@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { serveScience } from "./origins-api.js";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const checkpointRoute = /^\/api\/checkpoints\/([\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12})$/i;
@@ -24,7 +25,7 @@ async function hashToken(token) {
   return hex(new Uint8Array(digest));
 }
 
-async function readCheckpoint(request) {
+async function readJson(request) {
   const contentType = request.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase();
   if (contentType !== "application/json") {
     throw json({ error: "Envie o checkpoint como application/json." }, 415);
@@ -50,16 +51,24 @@ async function readCheckpoint(request) {
       body += decoder.decode(value, { stream: true });
     }
     body += decoder.decode();
-    const checkpoint = JSON.parse(body)?.checkpoint;
-    if (checkpoint === null || typeof checkpoint !== "object" || Array.isArray(checkpoint)) {
-      throw json({ error: "Esperado um objeto no campo checkpoint." }, 400);
-    }
-    return JSON.stringify(checkpoint);
+    return JSON.parse(body);
   } catch (error) {
     if (error instanceof Response) throw error;
     throw json({ error: "JSON inválido." }, 400);
   } finally {
     reader.releaseLock();
+  }
+}
+
+async function readCheckpoint(request) {
+  const checkpoint = (await readJson(request))?.checkpoint;
+  if (checkpoint === null || typeof checkpoint !== "object" || Array.isArray(checkpoint)) {
+    throw json({ error: "Esperado um objeto no campo checkpoint." }, 400);
+  }
+  try {
+    return JSON.stringify(checkpoint);
+  } catch {
+    throw json({ error: "JSON inválido." }, 400);
   }
 }
 
@@ -75,7 +84,7 @@ function storageProvider(env) {
   return env.DATABASE_URL ? "neon" : null;
 }
 
-async function supabaseRpc(env, name, params) {
+async function supabaseRpc(env, name, params, science = false) {
   const key = env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
   const rpcName = env.SUPABASE_PUBLISHABLE_KEY ? "xenora_gateway_" + name : "xenora_" + name;
   const url = new URL("/rest/v1/rpc/" + rpcName, env.SUPABASE_URL);
@@ -90,7 +99,16 @@ async function supabaseRpc(env, name, params) {
     // Workers supports manual redirects. Reject the 3xx below without forwarding credentials.
     redirect: "manual"
   });
-  if (!response.ok) throw new Error("Supabase indisponível");
+  if (!response.ok) {
+    if (science) {
+      const problem = await response.json().catch(() => ({}));
+      if (problem?.code === "PT404") throw json({ error: "Mundo, execução ou revisão indisponível." }, 404);
+      if (problem?.code === "PT409") throw json({ error: "A revisão mudou ou a operação já foi usada com outro conteúdo." }, 409);
+      if (problem?.code === "PT422") throw json({ error: "Esta revisão é incompatível com a execução." }, 422);
+      if (problem?.code === "PT400") throw json({ error: "Parâmetros científicos inválidos." }, 400);
+    }
+    throw new Error("Supabase indisponível");
+  }
   return response;
 }
 
@@ -129,6 +147,13 @@ async function serveApi(request, env, path) {
       : methodNotAllowed("GET");
   }
 
+  if (path === "/api/worlds" || path.startsWith("/api/worlds/")) {
+    const configured = provider === "supabase" && Boolean(env.SUPABASE_PUBLISHABLE_KEY && env.XENORA_GATEWAY_TOKEN);
+    return serveScience(request, path, {
+      configured, json, hashToken, readJson,
+      rpc: async (name, params) => (await supabaseRpc(env, name, params, true)).json()
+    });
+  }
   const isCollection = path === "/api/checkpoints";
   const item = checkpointRoute.exec(path);
   const missing = () => json({ error: "Checkpoint ou rota indisponível." }, 404);

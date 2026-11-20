@@ -1,0 +1,91 @@
+.origins {background: radial-gradient(ellipse at 70% -35%,#333b3a,transparent 62%),#0b1718}
+.po-bar {border-bottom: 1px solid #2f413f}
+.po-bar > div {max-width: 1600px; margin: auto; padding: 0 clamp(18px,3.3vw,64px); display: flex; align-items: center; gap: clamp(18px,4vw,62px); height: 66px}
+.po-brand {display: inline-flex; align-items: center; gap: 5px; font: 650 16px/1 var(--sans); letter-spacing: .1em; white-space: nowrap}
+.po-brand img {width: 31px; height: 31px; margin-right: 5px}
+.po-brand b {font-weight: 400; color: #b4c7bb}
+.po-bar nav {display: flex; gap: 24px; height: 100%}
+.po-bar nav a {display: flex; align-items: center; color: #aabbb4; font-size: 14px; border-bottom: 2px solid transparent; padding-top: 2px}
+.po-bar [aria-current] {border-color: #a4c59e; color: #e6efde}
+.po-archive-link {margin-left: auto; font-size: 13px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px}
+.po-title {display: flex; justify-content: space-between; align-items: end; gap: 12px; padding: 27px 0 20px}
+.po-title .eyebrow {color: #b5c9b5}
+.po-title h1 {color: #f1eedc}
+.po-state, #po-badge, #po-kind, .po-kicker {font: 500 11px/1.45 var(--mono); letter-spacing: .055em}
+.po-state {border: 1px solid #3c5549; border-radius: 30px; padding: 5px 11px; color: #d0e0c5; white-space: nowrap}
+.po-workbench {display: grid; grid-template-columns: minmax(0,1fr) clamp(245px,24%,315px); gap: 14px}
+.po-observatory, .po-inspect, .po-card, .po-readouts {min-width: 0; background: #122320; border: 1px solid var(--line); border-radius: 9px; overflow: hidden}
+.po-observatory {display: flex; flex-direction: column}
+.po-stage {position: relative; background: #0c1822; height: clamp(308px,51vh,600px); min-height: 280px; flex: 1 1 auto}
+#po-canvas {position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair}
+.po-overlay {position: absolute; inset: 13px 14px auto; display: flex; justify-content: space-between; align-items: start; gap: 10px; pointer-events: none}
+#po-badge, #po-kind {color: #e5efde; background: #0b1b20bb; border: 1px solid #b1c9c74e; border-radius: 4px; padding: 4px 8px; text-transform: uppercase}
+#po-kind {background: transparent; border-color: transparent; font-size: 10px; text-shadow: 0 1px 4px #071215}
+.po-map-caption {position: absolute; bottom: 12px; left: 14px; max-width: calc(100% - 28px); font: 11px/1.4 var(--mono); color: #e5e6d6; background: #0b171bbd; padding: 4px 7px; border-radius: 4px; pointer-events: none}
+.po-transport, .po-transport > div, .po-actions, .po-inspect-actions {display: flex; align-items: center; flex-wrap: wrap; gap: 7px}
+.po-transport {justify-content: space-between; gap: 8px; padding: 11px 13px; border-top: 1px solid var(--line)}
+.po-transport label, .po-card form label {font-size: 12px; color: #b8cbbf}
+.po-transport select, .po-card input {min-width: 0; max-width: 100%; color: var(--ink); background: #11251f; border: 1px solid #455e51; border-radius: 5px; padding: 7px; font: 13px var(--sans)}
+.po-inspect {padding: 16px; background: linear-gradient(145deg,#1a2b28,#12221f); display: flex; flex-direction: column; gap: 8px}
+.po-kicker {text-transform: uppercase; color: #aec3b0; border-bottom: 1px solid var(--line); padding-bottom: 9px}
+.po-inspect h2,.po-card h2 {font: 400 clamp(27px,2.4vw,39px)/1.04 var(--serif); letter-spacing: -.035em}
+.po-inspect p, .po-card p {color: #becdc3; font-size: 14px; line-height: 1.45}
+.po-inspect dl div {display: grid; grid-template-columns: 1.12fr 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid #30453d; font-size: 12px}
+.po-inspect dt {color: #a9bdaf}
+.po-inspect dd {margin: 0; font: 500 12px/1.4 var(--mono); color: #e5ecda; text-align: right; overflow-wrap: anywhere}
+.po-inspect-actions {margin-top: auto; padding-top: 6px}
+.po-inspect-actions button {font-size: 12px}
+.po-timeline {list-style: none; padding: 0; margin: 14px 0 0; display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); border: 1px solid var(--line); border-radius: 7px; overflow: hidden}
+.po-timeline li {min-width: 0; text-align: center; font: 500 12px/1.4 var(--sans); color: #94aaa0; padding: 9px 3px; background: #11211f; border-right: 1px solid var(--line)}
+.po-timeline li:last-child {border: 0}
+.po-timeline li[data-reached=true] {color: #c4d2bd}
+.po-timeline li[aria-current=step] {background: #293d32; color: #e3eece; box-shadow: inset 0 -2px #b5db94}
+.po-readouts {display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); margin: 10px 0 14px; padding: 10px 0; text-align: center}
+.po-readouts > div {display: grid; gap: 3px; border-right: 1px solid var(--line)}
+.po-readouts > div:last-child {border: 0}
+.po-readouts span {font-size: 11px; color: #b2c3b8}
+.po-readouts b {font: 500 16px/1.3 var(--mono); color: #e4ead8}
+.po-lower {display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px}
+.po-card {padding: 16px clamp(14px,1.6vw,24px)}
+.po-card h2 {font-size: 28px; margin-bottom: 8px}
+.po-actions {margin: 9px 0 0}
+.po-actions input {width: 130px}
+.po-card .po-note {margin-top: 12px; font-size: 12px}
+.po-note a {color: #ddedc5; text-decoration: underline; text-underline-offset: 2px}
+.po-card .po-feedback {font: 12px/1.45 var(--mono); color: #ccddbc; margin-top: 8px}
+.po-feedback:empty {display: none}
+.po-table-scroll {overflow-x: auto}
+.po-card table {margin-top: 10px; border-collapse: collapse; width: 100%; font: 12px/1.45 var(--mono)}
+.po-card td, .po-card th {text-align: right; padding: 5px 3px; border-top: 1px solid var(--line); font-weight: 400}
+.po-card td:first-child, .po-card th:first-child {text-align: left; color: #bdcec0; font-family: var(--sans)}
+.po-journal {margin: 12px 0}
+.po-journal summary {cursor: pointer}
+.po-journal ol {list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; font: 13px/1.45 var(--sans); color: #c0d0c5}
+#po-error:not(:empty) {padding: 10px; color: #ffd7ab; background: #3a3022; border-radius: 6px}
+#world-archive {margin: 17px 0 32px}
+@media(max-width: 860px) {
+  .po-workbench {grid-template-columns: minmax(0,1fr) minmax(200px,31%)}
+  .po-lower {grid-template-columns: 1.2fr 1fr}
+}
+@media(max-width: 650px) {
+  .po-workbench,.po-lower {grid-template-columns: minmax(0,1fr)}
+  .po-stage {height: 335px}
+  .po-inspect {gap: 7px}
+  .po-timeline {display: flex; flex-wrap: wrap}
+  .po-timeline li {flex: 1 1 24%; border-bottom: 1px solid var(--line)}
+  .po-bar > div {height: 55px; gap: 14px}
+  .po-bar nav {gap: 12px}
+  .po-brand {font-size: 12px}
+  .po-brand img {width: 24px; height: 24px; margin-right: 2px}
+  .po-bar nav a {font-size: 12px}
+  .po-archive-link {display: none}
+  .po-readouts {grid-template-columns: repeat(2,minmax(0,1fr)); row-gap: 10px}
+  .po-readouts > div:nth-child(2) {border: 0}
+  .po-transport {align-items: start}
+}
+
+#po-surface {padding-top: 8px; width: 100%}
+#po-surface p {margin: 6px 0 0; font-size: 12px}
+
+#po-error:not(:empty) {margin-bottom: 12px}
+.po-card .po-mode {font: 12px/1.4 var(--mono); margin-top: 8px; color: #cfe0bb}

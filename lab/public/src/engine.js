@@ -1,4 +1,5 @@
 import { Environment } from "./environment.js";
+import { PrimordialParticles, surfaceMineralSites } from "./primordial-particles.js";
 import {
   assimilateMolecules, createCell, createGenome, divideMolecules, makeGenome, molecularTraits,
   remodelFromReserve, validMolecules
@@ -73,6 +74,91 @@ function initializeMolecules(org, genome) {
   org.flux = { light: 0, uptake: 0 };
 }
 
+// The sampled microdomain is a separate representative aliquot. Element lots
+// constrain its available matter; no material is debited from or added to the macro history.
+function normalizeSurface(sample) {
+  if (!record(sample) || sample.kind !== "primordial-surface" || sample.version !== 1 ||
+      sample.source !== "stellar-neighborhood" || sample.formula !== "Mg2SiO4" ||
+      !integer(sample.seed, 0, 0xffffffff) || !integer(sample.tick) ||
+      !integer(sample.handoffTick, 0, sample.tick) || typeof sample.silicon !== "boolean" ||
+      (sample.silicon ? sample.branchTick !== null : !integer(sample.branchTick, 0, sample.tick)) ||
+      !["mineralUnits", "carbon", "oxygen"].every(k => inRange(sample[k], 0, Number.MAX_SAFE_INTEGER)) ||
+      sample.mineralDensity !== Math.min(1, sample.mineralUnits / 2.3))
+    throw new Error("Amostra de superfície inválida.");
+  const origin = Object.fromEntries(["kind", "version", "seed", "tick", "handoffTick", "branchTick",
+    "source", "formula", "silicon", "carbon", "oxygen", "mineralUnits", "mineralDensity"].map(k => [k, sample[k]]));
+  const uuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+  if (sample.parentRunId != null || sample.parentRevisionId != null) {
+    if (!uuid.test(sample.parentRunId) || !uuid.test(sample.parentRevisionId)) throw new Error("Referência de arquivo inválida.");
+    origin.parentRunId = sample.parentRunId;
+    origin.parentRevisionId = sample.parentRevisionId;
+  }
+  const fresh = new PrimordialParticles(origin.seed, origin);
+  const parcels = sample.parcels ?? fresh.particles;
+  if (!Array.isArray(parcels) || parcels.length !== fresh.particles.length ||
+      !parcels.every((p,i) => validPosition(p) && p.id === i + 1 && p.kind === fresh.particles[i].kind))
+    throw new Error("Distribuição espacial da amostra inválida.");
+  origin.parcels = parcels.map(({ id, x, y, kind }) => ({ id, x, y, kind }));
+  const lamp = sample.energySource ?? fresh.source;
+  if (!validPosition(lamp) || !inRange(lamp.power, 0, 8)) throw new Error("Fonte da amostra inválida.");
+  origin.energySource = { x: lamp.x, y: lamp.y, power: lamp.power };
+  const limiting = Math.min(origin.carbon, origin.oxygen);
+  origin.substrateMass = 24 * limiting / (1 + limiting);
+  origin.inoculum = { count: 1, mass: 3.2, energy: 4.2 };
+  return origin;
+}
+
+function sampleRocks(origin) {
+  return surfaceMineralSites(origin.seed, origin.mineralDensity).map(site => ({
+    id: site.id, x: site.x, y: site.y, radius: site.radius * 0.22, phase: site.id * 0.7,
+    formula: origin.formula, lotId: "silicate-1", source: origin.source
+  }));
+}
+
+function individualRecord(org) {
+  return { id: org.id, parentId: org.parent, lineage: org.lineage, generation: org.generation,
+    sequence: org.genome.sequence, mutationDelta: org.mutationDelta };
+}
+
+export function validEventIndividual(event, nextId) {
+  const d = event?.individual;
+  if (!record(d) || !["birth","death"].includes(event.type) || d.id !== event.id ||
+      !integer(d.id,1,nextId-1) || !integer(d.lineage,1,d.id) || !integer(d.generation) ||
+      typeof d.sequence !== "string" || d.sequence.length !== 20 || !/^[01]{20}$/.test(d.sequence) ||
+      ![-0.05,0,0.05].includes(d.mutationDelta)) return false;
+  if (d.generation === 0 ? d.parentId !== null || d.lineage !== d.id || d.mutationDelta !== 0 :
+      !integer(d.parentId,d.lineage,d.id-1)) return false;
+  const allocation = (d.sequence.match(/1/g) ?? []).length / 20;
+  if (!inRange(allocation-d.mutationDelta,-1e-12,1+1e-12)) return false;
+  return event.type !== "birth" || (d.parentId === event.parent && d.generation > 0 &&
+    (event.allocation === undefined || (Number.isFinite(event.allocation) && Math.abs(event.allocation - allocation) <= 1e-12)) &&
+    (event.mutationDelta === undefined || event.mutationDelta === d.mutationDelta));
+}
+
+function validEventKinship(state) {
+  const known = new Map(state.organisms.map(org => [org.id,individualRecord(org)]));
+  for (const event of state.events) {
+    if (event.individual === undefined) continue;
+    if (!validEventIndividual(event,state.nextId)) return false;
+    const d = event.individual, previous = known.get(d.id);
+    if (previous && Object.keys(previous).some(k => previous[k] !== d[k])) return false;
+    known.set(d.id,d);
+  }
+  for (const child of known.values()) {
+    const parent = known.get(child.parentId);
+    if (!parent) continue;
+    if (child.lineage !== parent.lineage || child.generation !== parent.generation + 1) return false;
+    let changed = 0, direction = 0;
+    for (let i = 0; i < child.sequence.length; i++) {
+      if (child.sequence[i] === parent.sequence[i]) continue;
+      changed++;
+      direction += child.sequence[i] === "1" ? 1 : -1;
+    }
+    if (changed > 1 || direction / 20 !== child.mutationDelta) return false;
+  }
+  return true;
+}
+
 function validCheckpoint(state, dissolvedMass) {
   if (!record(state) || ![1, 2, SNAPSHOT_VERSION].includes(state.version) || !validPosition(state.light) ||
     !integer(state.seed, 0, 0xffffffff) || !integer(state.rng, 1, 0xffffffff) ||
@@ -83,7 +169,20 @@ function validCheckpoint(state, dissolvedMass) {
     !["organisms", "grains", "minerals", "detritus", "events"].every(key => Array.isArray(state[key]))) return false;
 
   // Version 1 starts with 130 grains (at most 1 each) and 24 bodies (at most 3.6 each).
-  if (state.initialMass <= 0 || state.initialMass > 217 || state.initialPopulation !== 24 ||
+  let founders = 24;
+  if (state.originSample !== undefined) {
+    if (state.version !== SNAPSHOT_VERSION) return false;
+    const origin = normalizeSurface(state.originSample), raw = state.originSample;
+    const sites = sampleRocks(origin);
+    if (!Array.isArray(raw.parcels) || !record(raw.energySource) || state.seed !== origin.seed ||
+        raw.substrateMass !== origin.substrateMass || !record(raw.inoculum) ||
+        !["count", "mass", "energy"].every(k => raw.inoculum[k] === origin.inoculum[k]) ||
+        Math.abs(state.initialMass - origin.substrateMass - origin.inoculum.mass) > 1e-9 ||
+        state.initialEnergy !== origin.inoculum.energy || state.minerals.length !== sites.length ||
+        !sites.every((site,i) => Object.entries(site).every(([key,value]) => state.minerals[i]?.[key] === value))) return false;
+    founders = 1;
+  }
+  if (state.initialMass <= 0 || state.initialMass > 217 || state.initialPopulation !== founders ||
     state.organisms.length !== state.initialPopulation + state.births - state.deaths ||
     state.events.length > EVENT_LIMIT) return false;
   const input = state.version === 1 ? 0 : state.nutrientInputTotal;
@@ -111,20 +210,6 @@ function validCheckpoint(state, dissolvedMass) {
       if (group === "detritus" && !integer(obj.decayAt, state.tick + 1)) return false;
     }
   }
-  if (state.version === SNAPSHOT_VERSION) {
-    const living = new Map(state.organisms.map(org => [org.id, org]));
-    for (const child of state.organisms) {
-      const parent = living.get(child.parent);
-      if (!parent) continue;
-      const delta = child.genome.allocation - parent.genome.allocation;
-      if (Math.abs(delta - child.mutationDelta) > 1e-12) return false;
-      let changed = 0;
-      for (let i = 0; i < child.genome.sequence.length; i++) {
-        if (child.genome.sequence[i] !== parent.genome.sequence[i]) changed++;
-      }
-      if (changed !== (child.mutationDelta === 0 ? 0 : 1)) return false;
-    }
-  }
   let prevTick = 0;
   for (const event of state.events) {
     if (!record(event) || !integer(event.tick, prevTick, state.tick) || typeof event.text !== "string" ||
@@ -136,6 +221,7 @@ function validCheckpoint(state, dissolvedMass) {
     if ((event.type === "birth" || event.type === "death") && !integer(event.id, 1, state.nextId - 1)) return false;
     if (event.type === "birth" && !integer(event.parent, 1, event.id - 1)) return false;
   }
+  if (state.version === SNAPSHOT_VERSION && !validEventKinship(state)) return false;
   const mass = total(state.organisms, "mass") + total(state.grains, "mass") + total(state.detritus, "mass") + dissolvedMass;
   const stored = total(state.organisms, "energy");
   const expected = state.initialEnergy + state.absorbedEnergy - state.dissipatedEnergy;
@@ -144,7 +230,11 @@ function validCheckpoint(state, dissolvedMass) {
 }
 
 export class World {
-  constructor(seed = 42) {
+  static fromSurfaceSample(sample) {
+    return new this(sample?.seed, sample ?? {});
+  }
+
+  constructor(seed = 42, surface = null) {
     this.seed = seedValue(seed);
     this.rng = this.seed || 0x9e3779b9;
     this.tick = 0;
@@ -167,6 +257,23 @@ export class World {
     this.dissolvedUptakeLastTick = 0;
     this.telemetry = [];
 
+    if (surface !== null) {
+      this.originSample = normalizeSurface(surface);
+      if (this.seed !== this.originSample.seed) throw new Error("Semente da amostra incompatível.");
+      this.populateSurface();
+    } else {
+      this.populateLab();
+    }
+    this.initialPopulation = this.organisms.length;
+    this.initialMass = total(this.grains, "mass") + total(this.organisms, "mass") + this.environment.totals().total;
+    this.initialEnergy = total(this.organisms, "energy");
+    const start = this.originSample ? "Uma célula virtual externa foi inoculada na amostra de superfície." :
+      "A lagoa foi povoada com " + this.initialPopulation + " organismos.";
+    this.log("start", start);
+    this.recordTelemetry();
+  }
+
+  populateLab() {
     const rocks = [[0.15, 0.23, 0.026], [0.22, 0.76, 0.037], [0.52, 0.28, 0.032],
       [0.52, 0.71, 0.037], [0.84, 0.25, 0.024], [0.84, 0.71, 0.031], [0.68, 0.48, 0.018]];
     for (const [x, y, radius] of rocks) {
@@ -193,11 +300,34 @@ export class World {
     // Assign founder genotypes after placing all initial entities so their
     // starting locations and material inventories stay paired across model versions.
     for (const org of this.organisms) initializeMolecules(org, createGenome(() => this.random()));
-    this.initialPopulation = this.organisms.length;
-    this.initialMass = total(this.grains, "mass") + total(this.organisms, "mass");
-    this.initialEnergy = total(this.organisms, "energy");
-    this.log("start", "A lagoa foi povoada com " + this.initialPopulation + " organismos.");
-    this.recordTelemetry();
+  }
+
+  populateSurface() {
+    const sample = this.originSample;
+    this.minerals = sampleRocks(sample);
+    this.nextId = this.minerals.length + 1;
+    this.environment = new Environment({ size: 24, minerals: this.minerals });
+    this.light = { x: sample.energySource.x, y: sample.energySource.y };
+    const reactive = sample.parcels.filter(p => p.kind !== "c");
+    const perParcel = reactive.length ? sample.substrateMass / reactive.length : 0;
+    for (const p of reactive) {
+      if (!perParcel) break;
+      // A sites seed particulate resources; B sites seed the aqueous pool.
+      if (p.kind === "a") {
+        const r = grainRadius(perParcel);
+        this.addGrain(clamp(p.x, r, 1-r), clamp(p.y, r, 1-r), perParcel);
+      } else this.environment.add("nutrient", p.x, p.y, perParcel);
+    }
+    const { mass, energy } = sample.inoculum;
+    const radius = bodyRadius(mass);
+    let x = clamp(this.light.x, radius, 1-radius), y = clamp(this.light.y, radius, 1-radius);
+    if (!this.free(x,y,radius)) [x,y] = this.findStart(radius);
+    const id = this.nextId++;
+    const founder = { id, x, y, mass, energy, radius, parent: null, lineage: id, angle: 0,
+      sensitivity: 0.5, generation: 0, age: 0, maxAge: 1500, cooldown: 0, phase: 0,
+      activeDistance: 0, passiveDistance: 0 };
+    initializeMolecules(founder, makeGenome(0.5));
+    this.organisms.push(founder);
   }
 
   random() {
@@ -261,7 +391,7 @@ export class World {
   incidentLightAt(x, y) {
     const dx = x - this.light.x;
     const dy = y - this.light.y;
-    return Math.exp(-(dx * dx + dy * dy) / 0.055);
+    return Math.min(1, this.originSample?.energySource.power ?? 1) * Math.exp(-(dx * dx + dy * dy) / 0.055);
   }
 
   lightAt(x, y) {
@@ -447,7 +577,8 @@ export class World {
         birthText += " Por mutação, a filha " + change + " uma posição para pigmento (" + points + " pontos percentuais).";
       }
       this.log("birth", birthText,
-        { id: child.id, parent: org.id, allocation: child.genome.allocation, mutationDelta: child.mutationDelta });
+        { id: child.id, parent: org.id, allocation: child.genome.allocation,
+          mutationDelta: child.mutationDelta, individual: individualRecord(child) });
       return;
     }
   }
@@ -505,7 +636,8 @@ export class World {
         this.deaths++;
         this.dissipatedEnergy += org.energy;
         this.addDetritus(org.x, org.y, org.mass);
-        this.log("death", "Organismo #" + org.id + " retornou ao detrito (" + cause + ").", { id: org.id });
+        this.log("death", "Organismo #" + org.id + " retornou ao detrito (" + cause + ").",
+          { id: org.id, individual: individualRecord(org) });
         continue;
       }
       org.flux.uptake = this.absorbNutrient(org);
@@ -589,6 +721,7 @@ export class World {
       "detritus", "events", "births", "deaths", "activeDistance", "passiveDistance", "absorbedEnergy",
       "dissipatedEnergy", "initialPopulation", "initialMass", "initialEnergy"]) world[key] = state[key];
     world.environment = environment;
+    if (state.originSample !== undefined) world.originSample = normalizeSurface(state.originSample);
     world.environment.tick = world.tick;
     world.nutrientInputTotal = missingWater ? 0 : state.nutrientInputTotal;
     world.telemetry = missingWater ? [] : state.telemetry;

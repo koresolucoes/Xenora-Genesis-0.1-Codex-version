@@ -27,6 +27,24 @@ Em **Dados ao vivo**, o ensaio de seleção compara duas linhagens fundadoras so
 
 O formato v3 preserva fitas, compartimentos, fluxos e histórico de medições. Ao abrir v1 ou v2, as células existentes recebem uma fita equilibrada e os compartimentos dividem a biomassa preexistente. O relógio, a energia e o estado do gerador aleatório são preservados. As medições moleculares começam no passo da migração. A partir desse ponto, as cópias do mesmo mundo podem ser reproduzidas com as mesmas intervenções.
 
+## Origens e cultura de superfície
+
+Abra `/primordial.html` em **Universo primordial**. Os passos representam épocas comprimidas. O fundo cosmológico segue temperatura relativa proporcional a 1/a e densidade de matéria proporcional a 1/a³. O colapso local usa um limiar de sobredensidade. A ejeção estelar é uma entrada tabelada com procedência e quantidade registrada, e a condensação de forsterita a pressão prescrita utiliza dois lotes de Mg, um de Si e quatro de O por lote de Mg₂SiO₄. Cada elemento tem seu próprio saldo. O controle sem silício exporta o Si disponível. Um controle iniciado após a condensação mantém os sólidos anteriores à intervenção.
+
+Na época de lagoa, um domínio local representa a superfície com 120 partículas, fontes de energia e sítios associados ao inventário mineral. A dinâmica por ligações locais pode produzir agregados persistentes. O observador acompanha sua estrutura. A superfície e o disco usam escalas e unidades distintas. A condensação e a transição à superfície são aproximações parametrizadas.
+
+**Observar uma célula neste meio** abre uma cultura molecular com um único fundador fornecido pelo pesquisador. As posições da amostra, os sítios minerais e a fonte de energia vêm do mundo primordial. O inóculo tem seu próprio orçamento inicial. A sua descendência usa o motor da lagoa e pode ser acompanhada no inspetor. O link **Voltar à origem** retoma o checkpoint da amostra na mesma aba. A origem ambiental e a introdução do fundador ficam registradas na cultura.
+
+## Arquivo científico no Supabase
+
+Aplique `schema-supabase.sql` e em seguida `schema-origins.sql`, no mesmo projeto. O arquivo usa o gateway privado já configurado. Na interface de cada laboratório, **Salvar revisão** cria um mundo e um ramo ou acrescenta uma revisão à execução aberta. Em **Chave e histórico de revisões**, copie a chave para poder recuperar o mundo em outro navegador, abra um passo anterior e bifurque o ramo. A chave concede leitura e escrita nesse mundo. Uma chave anterior de checkpoint continua válida na opção **Experimento** da lagoa.
+
+As rotas sob `/api/worlds` aceitam os modos `primordial` e `lagoon-molecular`. O cliente gera os identificadores e o segredo do mundo antes do envio. A escrita usa um identificador de operação estável e a revisão esperada. O Worker restaura o estado, calcula as observações e envia o lote. O PostgreSQL arquiva a revisão e o recibo em uma transação. Uma repetição idêntica recebe o mesmo recibo, e uma escrita obsoleta recebe HTTP 409. Um fork copia o estado e as observações da revisão de origem. Uma revisão pode ser consultada independentemente do ramo corrente.
+
+As tabelas `science_worlds`, `science_runs`, `science_revisions`, `science_observations` e `science_requests` estão no esquema `xenora_private`. As observações preservam amostras, procedência de minerais, inventários, eventos e evidência genealógica presente nas revisões enviadas. As janelas do motor são limitadas e grandes intervalos sem envio podem deixar lacunas. A opção de salvamento periódico exige uma revisão inicial, uma aba aberta e conexão. O motor roda no navegador.
+
+Além de `npm test` na pasta `lab`, o ensaio independente em `test/postgres` verifica a migração reaplicável, concorrência, isolamento entre mundos, rollback e a leitura dos checkpoints antigos em PostgreSQL real.
+
 ## Checkpoints remotos opcionais
 
 O Worker entrega os arquivos de `public` e atende as rotas de armazenamento. Para desenvolvimento local, instale as dependências com `npm ci` e execute `npm run dev`. O comando `npm run build` empacota o Worker em modo de simulação de deploy. Para publicar pelo Sites, `npm run build:sites` gera o módulo único `dist/server/index.js`, com a API e uma cópia dos arquivos de `public`. O manifesto do Site usa o modo Worker, e os segredos são variáveis do ambiente de execução. Um caminho de arquivo de saída pode ser passado após `--` quando o checkout do Site estiver em outro diretório.
