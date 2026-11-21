@@ -169,13 +169,17 @@ function renderEvidence() {
 }
 function renderConditions(m) {
   const sample=sampleProperties(world);
-  const data=[['Temperatura cinética',quantity(sample.temperatureK,'K')],['Temperatura-alvo',quantity(m.targetTemperatureK,'K')],
+  const data=[['Perfil físico',world.physicsProfile],['Passo interno do integrador',quantity(world.integrationDtFs,'fs',3)],['Temperatura cinética',quantity(sample.temperatureK,'K')],['Temperatura-alvo',quantity(m.targetTemperatureK,'K')],
     ['Volume do recipiente',quantity(sample.volumeNm3,'nm³',5)],['Densidade',quantity(sample.densityKgM3,'kg/m³',4)],
     ['Fase macroscópica',sample.phase],['Massa total',quantity(sample.massU,'u',4)],['Prótons / nêutrons / elétrons',sample.protons+' / '+sample.neutrons+' / '+sample.electrons],
     ['Carga líquida',quantity(sample.chargeElementary,'e')],['Pressão virial instantânea (estim.)',quantity(m.pressurePa,'Pa',1)],['Referência ideal',quantity(sample.idealPressurePa,'Pa',1)]];
   by('pw-phase-reason').textContent=sample.phaseReason;
-  const energies=[['kineticEnergyEv','Energia cinética'],['covalentPotentialEv','Potencial das ligações'],['weakPotentialEv','Potencial de interação fraca'],['totalEnergyEv','Energia do sistema'],['bathWorkEv','Trabalho do banho'],['volumeWorkEv','Trabalho das paredes'],['reactionHeatEv','Energia transferida por reações'],['energyError','Resíduo energético']];
-  for(const [key,label] of energies)if(Number.isFinite(m[key]))data.push([label,quantity(m[key],'eV',5)]);
+  const energies=[['kineticEnergyEv','Energia cinética'],['covalentPotentialEv','Potencial das ligações'],['weakPotentialEv','Potencial de interação fraca'],['totalEnergyEv','Energia do sistema'],['bathWorkEv','Trabalho do banho'],['volumeWorkEv','Trabalho das paredes'],['reactionHeatEv','Energia transferida por reações'],['energyError','Resíduo energético bruto']];
+  if(world.version===3)energies.push(['anglePotentialEv','Potencial angular'],['integrationDriftEv','Deriva numérica assinada'],['integrationAbsDriftEv','Deriva numérica absoluta acumulada'],['ledgerResidualEv','Fechamento contábil após incluir a deriva']);
+  for(const [key,label] of energies)if(Number.isFinite(m[key])) {
+    const value=m[key]!==0&&Math.abs(m[key])<1e-5?m[key].toExponential(3).replace('.',',')+' eV':quantity(m[key],'eV',5);
+    data.push([label,value]);
+  }
   markup(by('pw-energy'),rows(data));
 }
 function refreshView() {
@@ -189,6 +193,8 @@ function refreshView() {
 }
 function refresh() {
   const m=world.getMetrics(),obs=world.observer.metrics;
+  by('pw-profile').textContent=world.version===2?'Perfil físico v2 · legado':'Perfil físico v'+world.version;
+  by('pw-new-profile').hidden=world.version!==2;
   by('pw-tick').textContent=fmt(world.tick,0);by('pw-physical-time').textContent=m.timeFs>=1000?quantity(m.timeFs/1000,'ps',3):quantity(m.timeFs,'fs',1);by('pw-seed-label').textContent=String(world.seed);
   by('pw-status').textContent=pending?'Avançando':running?'Em curso':'Em pausa';by('pw-status').dataset.running=String(running||pending>0);
   by('pw-play').textContent=running||pending?'Pausar':'Iniciar';by('pw-play').setAttribute('aria-pressed',String(running||pending>0));
@@ -246,12 +252,18 @@ by('pw-play').onclick=()=>{if(running||pending)pause();else{running=true;lastTim
 by('pw-step').onclick=()=>{pause();world.step();refresh();};
 by('pw-advance').onclick=()=>{pause();pending=100;refresh();};
 by('pw-speed').onchange=e=>{speed=Number(e.target.value);credit=0;lastTime=0;};
-by('pw-new').onsubmit=e=>{
-  e.preventDefault();const seed=Number(by('pw-seed').value);
+function startNewWorld(seed,options={}) {
   if(!Number.isSafeInteger(seed)||seed<0||seed>4294967295){announce('Informe uma semente entre 0 e 4294967295.');return;}
-  try{session.save();replace(new AtomicWorld(seed));announce('Mundo aberto no passo zero.');}
-  catch(error){announce(error.message);}
-};
+  try{
+    const next=new AtomicWorld(seed,options);
+    session.assertCanAccept(next);session.save();replace(next);
+    announce('Nova execução v'+next.version+' aberta no passo zero.');
+  }catch(error){announce(error.message);}
+}
+by('pw-new').onsubmit=e=>{e.preventDefault();startNewWorld(Number(by('pw-seed').value));};
+by('pw-new-profile').onclick=()=>startNewWorld(world.seed,{
+  count:world.particles.length,temperatureK:world.initialTemperatureK,volumeNm3:world.initialVolumeNm3,...world.controls
+});
 by('pw-environment-form').onsubmit=e=>{
   e.preventDefault();const temp=Number(by('pw-temperature').value),volume=Number(by('pw-volume').value);
   const fields=world.getMetrics();
@@ -300,11 +312,13 @@ by('pw-fullscreen').onclick=async()=>{
 };
 function loop(now) {
   if(pending||running){
-    if(pending){const batch=Math.min(8,pending);for(let i=0;i<batch;i++)world.step();pending-=batch;}
-    else{
+    const until=performance.now()+10;
+    if(pending){
+      let advanced=0;
+      do{world.step();pending--;advanced++;}while(pending&&advanced<8&&performance.now()<until);
+    }else{
       if(lastTime)credit+=Math.min(200,now-lastTime)*6*speed/1000;
-      const steps=Math.floor(credit);credit-=steps;
-      for(let i=0;i<steps;i++)world.step();
+      while(credit>=1&&performance.now()<until){world.step();credit--;}
     }
     lastTime=now;
     if(now-lastPaint>=80||(!running&&!pending)){refresh();lastPaint=now;}

@@ -165,6 +165,7 @@ test("restored baseline has its own observation coverage and viewing is neutral 
   const baseline = JSON.parse(gunzipSync(readFileSync(archived)));
   assert.equal(baseline.reactionBench, undefined);
   const source = new AtomicWorld(baseline.seed, {
+    physicsVersion: 2,
     count: baseline.particles.length,
     temperatureK: baseline.initialTemperatureK,
     volumeNm3: baseline.initialVolumeNm3,

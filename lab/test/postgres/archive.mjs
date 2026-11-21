@@ -333,6 +333,24 @@ await main(async ({ admin, connect, schema }) => {
   await schema("migrations/003-atomic-world.sql");
   await schema("migrations/004-reaction-bench.sql");
   await schema("migrations/004-reaction-bench.sql");
+  // Place a real v2 revision and receipt in the archive before applying the upgrade.
+  const previous=new AtomicWorld(42,{physicsVersion:2});
+  previous.step();
+  const {engineVersion:oldVersion,...oldObservations}=projectSnapshot("particle-world",previous.serialize());
+  assert.equal(oldVersion,"particle-world-v2");
+  const oldWorld=randomUUID(),oldRun=randomUUID(),oldRequest=randomUUID();
+  const oldBody={run:{id:oldRun,mode:"particle-world",engineVersion:oldVersion},...oldObservations};
+  const receipt=await write(owner,"create",oldBody,oldRequest,oldWorld);
+  await schema("migrations/005-calibrated-atomic-world.sql");
+  await schema("migrations/005-calibrated-atomic-world.sql");
+  assert.deepEqual(await write(owner,"create",oldBody,oldRequest,oldWorld),receipt);
+  const savedOld=await read(owner,{view:"checkpoint",runId:oldRun},capability,oldWorld);
+  assert.deepEqual(savedOld.checkpoint,previous.serialize());
+  const oldForkId=randomUUID();
+  await write(owner,"fork",{run:{id:oldForkId},parentRunId:oldRun,parentRevision:1},randomUUID(),oldWorld);
+  const savedOldFork=await read(owner,{view:"checkpoint",runId:oldForkId},capability,oldWorld);
+  assert.equal(savedOldFork.engineVersion,oldVersion);
+  assert.deepEqual(savedOldFork.checkpoint,savedOld.checkpoint);
   const models = {
     primordial: new PrimordialWorld({ seed: 42 }),
     "lagoon-molecular": new World(42),
@@ -366,7 +384,13 @@ await main(async ({ admin, connect, schema }) => {
       assert.equal(restored.coverage.speciesBasis,"current graph including free atoms");
       const next={...observations,runId,expectedRevision:1,mode,engineVersion};
       await rejected(write(owner,"append",{...next,quantities:[]},randomUUID(),worldId),"PT400");
-      const wrongStep=structuredClone(next);wrongStep.checkpoint.integrationSubsteps=8;
+      assert.equal(restored.coverage.physicsProfile,"neutral-chonps-h2-h2o-v3");
+      await rejected(write(owner,"append",{...next,runId:oldRun},randomUUID(),oldWorld),"PT409");
+      await rejected(write(owner,"append",{...oldObservations,mode,engineVersion:oldVersion,
+        runId,expectedRevision:1},randomUUID(),worldId),"PT409");
+      const wrongProfile=structuredClone(next);wrongProfile.samples[0].data.physicsProfile="other";
+      await rejected(write(owner,"append",wrongProfile,randomUUID(),worldId),"PT400");
+      const wrongStep=structuredClone(next);wrongStep.checkpoint.integrationSubsteps=32;
       await rejected(write(owner,"append",wrongStep,randomUUID(),worldId),"PT409");
       const wrongWindow=structuredClone(next);wrongWindow.samples[0].data.reactionWindow.startTick++;
       await rejected(write(owner,"append",wrongWindow,randomUUID(),worldId),"PT400");

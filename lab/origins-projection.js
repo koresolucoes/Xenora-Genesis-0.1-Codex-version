@@ -9,9 +9,9 @@ import { getCurrentSpecies } from "./public/src/reaction-bench.js";
 const MODEL_VERSIONS = Object.freeze({
   "lagoon-molecular": "lagoon-molecular-v3",
   primordial: "primordial-v1",
-  "evolving-world": "evolving-world-v1",
-  "particle-world": "particle-world-v2"
+  "evolving-world": "evolving-world-v1"
 });
+const atomicEngineVersions = new Map([[2,"particle-world-v2"],[3,"particle-world-v3"]]);
 
 const molecularMeasurements = [
   "population","initialPopulation","generation","births","deaths","totalMass","initialMass",
@@ -271,10 +271,21 @@ function projectAtomic(checkpoint) {
       "volumeWorkEv","reactionHeatEv","initialMassU","massError","energyError",
       "netCharge","distinctFormulas","ringMolecules","largestMoleculeAtoms"])};
   const canonical=world.serialize();
+  if(canonical.version!==checkpoint.version || world.version!==checkpoint.version)
+    throw new TypeError("O checkpoint mudou de versão durante a restauração.");
   // The SQL idempotency receipt hashes the full write. An unadvanced file from
   // before the bench must still generate exactly its original RPC projection.
   if (checkpoint.reactionBench) appendBenchObservation(world,canonical.reactionBench,events,data);
-  return {checkpoint:canonical,engineVersion:MODEL_VERSIONS["particle-world"],
+  if (canonical.version===3) {
+    if (canonical.physicsProfile!==checkpoint.physicsProfile || canonical.physicsProfile!==world.physicsProfile)
+      throw new TypeError("Perfil de física atômica incompatível.");
+    if (!Number.isFinite(world.integrationDriftEv) || !Number.isFinite(world.integrationAbsDriftEv) || world.integrationAbsDriftEv<0)
+      throw new TypeError("Registro de deriva da integração inválido.");
+    data.physicsProfile=world.physicsProfile;
+    data.integrationSubsteps=world.integrationSubsteps;
+    Object.assign(data,numbers(world,["integrationDriftEv","integrationAbsDriftEv"]));
+  }
+  return {checkpoint:canonical,engineVersion:atomicEngineVersions.get(canonical.version),
     samples:[{tick:world.tick,data}],quantities:[...stocks.values()],events,minerals:[],genealogy:[]};
 }
 
@@ -284,7 +295,9 @@ export function projectSnapshot(mode, checkpoint) {
   if (mode === "primordial") return projectPrimordial(checkpoint);
   if (mode === "evolving-world") return projectEvolving(checkpoint);
   if (mode === "particle-world") {
-    if (checkpoint.version !== 2 || checkpoint.mode !== mode || checkpoint.kind !== mode) throw new TypeError("Versão atômica incompatível");
+    if (!atomicEngineVersions.has(checkpoint.version) || checkpoint.mode !== mode || checkpoint.kind !== mode) throw new TypeError("Versão atômica incompatível");
+    if (checkpoint.version===2 && Object.hasOwn(checkpoint,"physicsProfile")) throw new TypeError("Perfil incompatível com o motor anterior.");
+    if (checkpoint.version===3 && checkpoint.physicsProfile!=="neutral-chonps-h2-h2o-v3") throw new TypeError("Perfil de calibração inválido.");
     return projectAtomic(checkpoint);
   }
   throw new TypeError("Modo desconhecido");

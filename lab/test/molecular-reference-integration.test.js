@@ -14,7 +14,17 @@ test("reference protocols compare two discretizations over the same physical tim
   const resume = AtomicWorld.restore(focus.serialize());
   const checkpoint = JSON.stringify(focus.serialize());
   const report = runMolecularReference();
-  assert.ok(report.protocol.durationFs > 0);
+  assert.equal(report.physicsVersion, 3);
+  assert.equal(report.protocol.durationFs, 480);
+  const reserved = report.species
+    .flatMap((s) => s.measurements)
+    .filter((m) => m.role === "referência reservada");
+  assert.deepEqual(
+    reserved.map((m) => m.id),
+    ["water-symmetric-trajectory"],
+  );
+  assert.equal(reserved[0].reference, 3832);
+  assert.equal(reserved[0].status, "aceito");
   assert.equal(report.species.length, 2);
   for (const s of report.species) {
     const runs = s.integration.runs;
@@ -68,6 +78,17 @@ test("reference protocols compare two discretizations over the same physical tim
       assert.equal(measure.status, measure.absoluteError <= measure.tolerance ? "aceito" : "inadequado");
     }
   }
+  const legacy = runMolecularReference({ physicsVersion: 2 });
+  assert.equal(legacy.physicsVersion, 2);
+  assert.equal(legacy.protocol.durationFs, report.protocol.durationFs);
+  const legacyMeasures = new Map(legacy.species.flatMap((s) => s.measurements).map((m) => [m.id, m]));
+  zeroSafeNear(legacyMeasures.get("h2-re").value, 0.062, 0.00001);
+  zeroSafeNear(legacyMeasures.get("water-angle").value, 60.4059, 0.0001);
+  assert.equal(legacyMeasures.get("h2-we").status, "sem medida");
+  assert.equal(
+    legacy.species.every((s) => s.status === "inadequado"),
+    true,
+  );
   assert.deepEqual(runMolecularReference(), report);
   assert.equal(JSON.stringify(focus.serialize()), checkpoint);
   focus.step();

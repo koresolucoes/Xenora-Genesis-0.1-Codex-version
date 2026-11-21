@@ -4,9 +4,12 @@
 import {ATOMIC_ELEMENTS,ATOMIC_SYMBOLS,maxBondOrder,bondEnergyEv} from './atomic-elements.js'
 import {observeAtomicWorld,validateAtomicObservation} from './atomic-observer.js'
 import {updateReactionBench,validateReactionBench} from './reaction-bench.js'
+import {CALIBRATED_MOLECULES,calibratedBondLaw,waterBend} from './calibrated-force-field.js'
 
 const KB=8.617333262e-5, UVEL=10364.2696563, U_KG=1.66053906660e-27, EV_J=1.602176634e-19
 const DT=1.2, SUBS=4, RC=.40, DEPTH=.013, STEEP=13, SPRING=165, MAX=384
+const TICK_FS=DT*SUBS, V3_SUBSTEPS=16
+const PROFILES={2:'neutral-chonps-v2',3:'neutral-chonps-h2-h2o-v3'}
 const integer=(x,min=0,max=Number.MAX_SAFE_INTEGER)=>Number.isSafeInteger(x)&&x>=min&&x<=max
 const finite=(x,min=-Infinity,max=Infinity)=>Number.isFinite(x)&&x>=min&&x<=max
 const check=v=>{if(!v)throw new Error('Estado da simulação atômica inválido.')}
@@ -15,9 +18,10 @@ const keys=['x','y','z'],vk=['vx','vy','vz']
 const controls=['bindingEnabled','thermostatEnabled']
 const energyK=(ps)=>ps.reduce((s,p)=>s+0.5*UVEL*p.massU*(p.vx*p.vx+p.vy*p.vy+p.vz*p.vz),0)
 const pairKey=(i,j)=>i*MAX+j
-export const ATOMIC_PHYSICS=Object.freeze({tickFs:DT*SUBS,dtFs:DT,maxCount:MAX,minTemperatureK:1,
+export const ATOMIC_PHYSICS=Object.freeze({tickFs:TICK_FS,dtFs:TICK_FS/V3_SUBSTEPS,integrationSubsteps:V3_SUBSTEPS,
+  legacyDtFs:DT,legacySubsteps:SUBS,version:3,physicsProfile:PROFILES[3],maxCount:MAX,minTemperatureK:1,
   maxTemperatureK:3000,minVolumeNm3:1,maxVolumeNm3:512,boltzmannEvK:KB,atomicMassKg:U_KG,
-  weakAttractionEv:DEPTH,phase:'indeterminada',model:'3D neutral atoms, effective Morse pair potential, harmonic covalent bonds, explicit reaction reservoir and optional thermal bath'})
+  weakAttractionEv:DEPTH,phase:'indeterminada',model:'3D molecular dynamics; calibrated intramolecular H2/H2O, effective bonds for other graphs, explicit reaction reservoir, optional thermal bath'})
 
 function random(seed,t,a,b=0,s=0){
   let x=(seed^Math.imul(t,0x9e3779b1)^Math.imul(a+s,0x85ebca6b)^Math.imul(b,0xc2b2ae35))>>>0
@@ -85,12 +89,45 @@ function nearby(ps,side,visit){
   }
 }
 
+// Rebuild only after a graph edit. Neighboring but unbonded species do not
+// change whether a component has the H2 or H2O intramolecular force field.
+const topologyCache=new WeakMap()
+function moleculeTerms(world){
+  if(world.version!==3)return null
+  let topology=topologyCache.get(world.bonds)
+  if(topology)return topology
+  const ps=world.particles, neighbors=Array.from(ps,()=>[])
+  const bonds=new Map(),excluded=new Set(),waters=[]
+  for(const b of world.bonds){
+    const i=b.a-1,j=b.b-1
+    neighbors[i].push([j,b.order]);neighbors[j].push([i,b.order])
+  }
+  for(const b of world.bonds){
+    const i=b.a-1,j=b.b-1
+    if(b.order===1&&ps[i].element==='H'&&ps[j].element==='H'&&neighbors[i].length===1&&neighbors[j].length===1)
+      bonds.set(pairKey(i,j),'H2')
+  }
+  for(let o=0;o<ps.length;o++){
+    if(ps[o].element!=='O'||neighbors[o].length!==2)continue
+    if(!neighbors[o].every(([h,order])=>ps[h].element==='H'&&order===1&&neighbors[h].length===1))continue
+    const [[a],[b]]=neighbors[o]
+    for(const h of [a,b])bonds.set(pairKey(Math.min(o,h),Math.max(o,h)),'H2O')
+    excluded.add(pairKey(Math.min(a,b),Math.max(a,b)))
+    waters.push([o,a,b])
+  }
+  topology={bonds,excluded,waters}
+  topologyCache.set(world.bonds,topology)
+  return topology
+}
+
 function forces(world){
   const ps=world.particles,side=world.sideNm,f=new Float64Array(ps.length*3)
-  let potential=0,virial=0,weak=0,covalent=0
+  let potential=0,virial=0,weak=0,covalent=0,angle=0
+  const topology=moleculeTerms(world)
   const bonded=new Set()
   function add(i,j,dx,dy,dz,d,order,energy){
-    const [u,g]=pairLaw(d,pairParameters(ps[i],ps[j]),order,energy)
+    const formula=order&&topology?.bonds.get(pairKey(i,j))
+    const [u,g]=formula?calibratedBondLaw(formula,d,energy):pairLaw(d,pairParameters(ps[i],ps[j]),order,energy)
     potential+=u;virial-=d*g
     if(order)covalent+=u;else weak+=u
     const scale=g/d,ix=i*3,jx=j*3
@@ -102,8 +139,22 @@ function forces(world){
     const dx=(q.x-p.x)*side,dy=(q.y-p.y)*side,dz=(q.z-p.z)*side
     add(i,j,dx,dy,dz,Math.max(1e-9,Math.hypot(dx,dy,dz)),b.order,b.energyEv);bonded.add(pairKey(i,j))
   }
-  nearby(ps,side,(i,j,dx,dy,dz,d)=>{if(!bonded.has(pairKey(i,j)))add(i,j,dx,dy,dz,d,0,0)})
-  return {f,potential,virial,weak,covalent}
+  nearby(ps,side,(i,j,dx,dy,dz,d)=>{
+    const key=pairKey(i,j)
+    if(!bonded.has(key)&&!topology?.excluded.has(key))add(i,j,dx,dy,dz,d,0,0)
+  })
+  for(const [o,a,b] of topology?.waters??[]){
+    const u=keys.map(k=>(ps[a][k]-ps[o][k])*side)
+    const v=keys.map(k=>(ps[b][k]-ps[o][k])*side)
+    const bend=waterBend(u,v)
+    for(let k=0;k<3;k++){
+      f[3*a+k]+=bend.forceH1[k];f[3*b+k]+=bend.forceH2[k]
+      f[3*o+k]-=bend.forceH1[k]+bend.forceH2[k]
+    }
+    angle+=bend.energyEv
+  }
+  // The angular potential is invariant under uniform scaling; its scalar virial is zero.
+  return {f,potential:potential+angle,virial,weak,covalent:covalent+angle,angle}
 }
 
 function scaleVelocity(ps,factor){
@@ -112,15 +163,21 @@ function scaleVelocity(ps,factor){
 
 export class AtomicWorld {
   #substeps
+  #physicsVersion
   get kind(){return 'particle-world'}
   get mode(){return 'particle-world'}
-  get version(){return 2}
+  get version(){return this.#physicsVersion}
+  get physicsVersion(){return this.#physicsVersion}
+  get physicsProfile(){return PROFILES[this.version]}
   get integrationSubsteps(){return this.#substeps}
   get integrationDtFs(){return DT*SUBS/this.#substeps}
   constructor(seed=42,options={}){
     const count=options.count??144
-    this.#substeps=options.integrationSubsteps===undefined?SUBS:options.integrationSubsteps
-    check(this.#substeps===SUBS || this.#substeps===2*SUBS)
+    this.#physicsVersion=options.physicsVersion===undefined?3:options.physicsVersion
+    check(this.version===2||this.version===3)
+    const defaultSteps=this.version===3?V3_SUBSTEPS:SUBS
+    this.#substeps=options.integrationSubsteps===undefined?defaultSteps:options.integrationSubsteps
+    check(this.#substeps===defaultSteps || this.#substeps===2*defaultSteps)
     this.targetTemperatureK=options.temperatureK??300;this.volumeNm3=options.volumeNm3??12
     check(integer(seed,0,0xffffffff)&&integer(count,0,MAX)&&finite(this.targetTemperatureK,1,3000)&&finite(this.volumeNm3,1,512))
     this.initialTemperatureK=this.targetTemperatureK;this.initialVolumeNm3=this.volumeNm3
@@ -143,6 +200,7 @@ export class AtomicWorld {
     if(count)scaleVelocity(this.particles,Math.sqrt(1.5*count*KB*this.targetTemperatureK/energyK(this.particles)))
     this.bonds=[];this.events=[];this.history=[];this.flux={formed:[],broken:[],upgraded:[]}
     this.bathWorkEv=0;this.volumeWorkEv=0;this.reactionHeatEv=0;this.integrationCorrectionEv=0
+    this.integrationDriftEv=0;this.integrationAbsDriftEv=0
     this.cumulativeFormed=0;this.cumulativeBroken=0;this.cumulativeUpgraded=0
     this.field=forces(this)
     this.initialEnergyEv=energyK(this.particles)+this.field.potential
@@ -176,9 +234,12 @@ export class AtomicWorld {
     this.record()
   }
   bondRest(b){
+    const formula=moleculeTerms(this)?.bonds.get(pairKey(b.a-1,b.b-1))
+    if(formula)return CALIBRATED_MOLECULES[formula].rEqNm/this.sideNm
     return pairParameters(this.particles[b.a-1],this.particles[b.b-1]).nominal*(1-.064*(b.order-1))/this.sideNm
   }
   changeBonds(){
+    if(this.version===3)return this.changeBondsV3()
     const ps=this.particles,side=this.sideNm,used=new Uint8Array(ps.length)
     const active=new Map(),survivors=[],blocked=new Set()
     let heat=0
@@ -216,14 +277,91 @@ export class AtomicWorld {
     this.cumulativeBroken+=this.flux.broken.length;this.cumulativeUpgraded+=this.flux.upgraded.length
     if(this.flux.formed.length||this.flux.broken.length||this.flux.upgraded.length)this.field=forces(this)
   }
+  changeBondsV3(){
+    const ps=this.particles,side=this.sideNm,startPotential=this.field.potential
+    const occupied=new Uint8Array(ps.length),active=new Map(),broken=new Set()
+    for(const b of this.bonds){
+      occupied[b.a-1]+=b.order;occupied[b.b-1]+=b.order
+      active.set(pairKey(b.a-1,b.b-1),b)
+    }
+    // Switching topology may activate the water angle, both stretch terms and
+    // the 1–3 exclusion. Evaluate the entire potential at identical positions.
+    const tryGraph=(candidate,association)=>{
+      const old=this.bonds
+      this.bonds=candidate
+      const field=forces(this),release=this.field.potential-field.potential
+      const available=this.reactionHeatEv+startPotential-this.field.potential
+      if(association?release<=0:available+release<0){
+        this.bonds=old
+        return false
+      }
+      this.field=field
+      for(const b of this.bonds)b.rest=this.bondRest(b)
+      return true
+    }
+    for(const b of this.bonds){
+      const i=b.a-1,j=b.b-1,p=ps[i],q=ps[j],r=Math.hypot(q.x-p.x,q.y-p.y,q.z-p.z)*side
+      if(!active.has(pairKey(i,j)))continue
+      const formula=moleculeTerms(this).bonds.get(pairKey(i,j))
+      const r0=b.rest*side,stretch=Math.max(0,r-r0)
+      // The Morse well tends continuously to zero. At three equilibrium
+      // lengths its remaining attraction can be paid by the reaction reservoir.
+      const radialU=formula?calibratedBondLaw(formula,r,b.energyEv)[0]:0
+      const strain=.5*SPRING*b.order*stretch**2
+      const separation=formula?r>3*r0:strain>b.energyEv
+      const barrier=formula?(r>r0?Math.max(0,-radialU):b.energyEv):Math.max(0,b.energyEv-strain)
+      const thermal=this.controls.thermostatEnabled ? .004*Math.exp(-barrier/(KB*this.targetTemperatureK)) : 0
+      if(!separation&&random(this.seed,this.tick,b.a,b.b,33)>=thermal)continue
+      let removed=[b]
+      // When both O–H bonds are pulled apart, a direct three-fragment
+      // channel avoids evaluating a highly stretched generic OH intermediate.
+      if(formula==='H2O'&&separation){
+        const oxygen=p.element==='O'?b.a:b.b
+        const other=this.bonds.find(edge=>edge!==b&&(edge.a===oxygen||edge.b===oxygen))
+        if(other){
+          const a=ps[other.a-1],c=ps[other.b-1]
+          if(Math.hypot(c.x-a.x,c.y-a.y,c.z-a.z)>3*other.rest)removed.push(other)
+        }
+      }
+      if(!tryGraph(this.bonds.filter(edge=>!removed.includes(edge)),false)){
+        if(removed.length===1||!tryGraph(this.bonds.filter(edge=>edge!==b),false))continue
+        removed=[b]
+      }
+      for(const edge of removed){
+        const k=pairKey(edge.a-1,edge.b-1)
+        this.flux.broken.push({...edge});broken.add(k);active.delete(k)
+        occupied[edge.a-1]-=edge.order;occupied[edge.b-1]-=edge.order
+      }
+    }
+    if(this.controls.bindingEnabled)nearby(ps,side,(i,j,dx,dy,dz,d)=>{
+      const p=ps[i],q=ps[j],key=pairKey(i,j),old=active.get(key),order=(old?.order??0)+1
+      if(broken.has(key)||occupied[i]>=ATOMIC_ELEMENTS[p.element].maxValence||
+        occupied[j]>=ATOMIC_ELEMENTS[q.element].maxValence||order>maxBondOrder(p.element,q.element))return
+      const contact=pairParameters(p,q).nominal
+      if(d>contact*(old?1.07:1.34)||d<.50*contact||
+        random(this.seed,this.tick,p.id,q.id,47)>(old ? .045 : .48))return
+      const b={a:i+1,b:j+1,order,formedAt:old?.formedAt??this.tick,energyEv:bondEnergyEv(p.element,q.element,order)}
+      const candidate=old?this.bonds.map(edge=>edge===old?b:edge):[...this.bonds,b]
+      if(!tryGraph(candidate,true))return
+      active.set(key,b);occupied[i]++;occupied[j]++
+      this.flux[old?'upgraded':'formed'].push({...b})
+    })
+    // A second edit in the same tick may have completed the molecule and
+    // changed the equilibrium length of an earlier surviving bond.
+    for(const b of [...this.flux.formed,...this.flux.upgraded])b.rest=this.bondRest(b)
+    this.flux.reactionHeatEv=startPotential-this.field.potential
+    this.reactionHeatEv+=this.flux.reactionHeatEv
+    this.cumulativeFormed+=this.flux.formed.length;this.cumulativeBroken+=this.flux.broken.length
+    this.cumulativeUpgraded+=this.flux.upgraded.length
+  }
   integrate(){
     const dt=this.integrationDtFs
-    const ps=this.particles,k0=energyK(ps),u0=this.field.potential
-    const before=new Float64Array(ps.length*6)
+    const ps=this.particles,project=this.version===2,k0=project?energyK(ps):0,u0=this.field.potential
+    const before=project?new Float64Array(ps.length*6):null
     for(let i=0;i<ps.length;i++){
       const p=ps[i],factor=.5*dt/(UVEL*p.massU)
       for(let k=0;k<3;k++){
-        before[6*i+k]=p[keys[k]];before[6*i+3+k]=p[vk[k]]
+        if(before){before[6*i+k]=p[keys[k]];before[6*i+3+k]=p[vk[k]]}
         p[vk[k]]+=factor*this.field.f[3*i+k]
         let pos=p[keys[k]]+dt*p[vk[k]]/this.sideNm
         if(pos<0||pos>1){const folded=((pos%2)+2)%2;pos=folded>1?2-folded:folded;if(folded>1)p[vk[k]]*=-1}
@@ -232,6 +370,7 @@ export class AtomicWorld {
     }
     const f=forces(this)
     for(let i=0;i<ps.length;i++)for(let k=0;k<3;k++)ps[i][vk[k]]+=.5*dt*f.f[i*3+k]/(UVEL*ps[i].massU)
+    if(!project){this.field=f;return}
     const target=k0+u0-f.potential, k1=energyK(ps)
     // Velocity-Verlet with a microcanonical energy projection: correct its
     // small truncation error and report the cumulative absolute correction.
@@ -247,7 +386,12 @@ export class AtomicWorld {
   step(){
     this.tick++;this.flux={formed:[],broken:[],upgraded:[],reactionHeatEv:0,bathWorkEv:0}
     this.changeBonds()
+    const before=this.version===3?energyK(this.particles)+this.field.potential:0
     for(let sub=0;sub<this.integrationSubsteps;sub++)this.integrate()
+    if(this.version===3){
+      const drift=energyK(this.particles)+this.field.potential-before
+      this.integrationDriftEv+=drift;this.integrationAbsDriftEv+=Math.abs(drift)
+    }
     if(this.controls.thermostatEnabled&&this.particles.length){
       const k=energyK(this.particles),want=1.5*this.particles.length*KB*this.targetTemperatureK
       const next=k+(want-k)*(-Math.expm1(-SUBS*DT/85))
@@ -262,6 +406,7 @@ export class AtomicWorld {
   molecules(){return this.observer.molecules}
   getMetrics(){
     const ps=this.particles,kinetic=energyK(ps),energy=kinetic+this.field.potential
+    const energyError=energy+this.reactionHeatEv-this.initialEnergyEv-this.bathWorkEv-this.volumeWorkEv
     const elementCounts=Object.fromEntries(ATOMIC_SYMBOLS.map(s=>[s,0]))
     let totalMassU=0,totalProtons=0,totalNeutrons=0,totalElectrons=0
     for(const p of ps){elementCounts[p.element]++;totalMassU+=p.massU;totalProtons+=p.protons;totalNeutrons+=p.neutrons;totalElectrons+=p.electrons}
@@ -275,7 +420,9 @@ export class AtomicWorld {
       kineticEnergyEv:kinetic,potentialEnergyEv:this.field.potential,weakPotentialEv:this.field.weak,covalentPotentialEv:this.field.covalent,
       totalEnergyEv:energy,initialEnergyEv:this.initialEnergyEv,bathWorkEv:this.bathWorkEv,volumeWorkEv:this.volumeWorkEv,
       reactionHeatEv:this.reactionHeatEv,integrationCorrectionEv:this.integrationCorrectionEv,
-      energyError:energy+this.reactionHeatEv-this.initialEnergyEv-this.bathWorkEv-this.volumeWorkEv,
+      energyError,physicsVersion:this.version,physicsProfile:this.physicsProfile,anglePotentialEv:this.field.angle,
+      integrationDriftEv:this.integrationDriftEv,integrationAbsDriftEv:this.integrationAbsDriftEv,
+      ledgerResidualEv:energyError-this.integrationDriftEv,
       cumulativeFormed:this.cumulativeFormed,cumulativeBroken:this.cumulativeBroken,cumulativeUpgraded:this.cumulativeUpgraded,
       phase:'indeterminada'}
   }
@@ -287,8 +434,10 @@ export class AtomicWorld {
     if(this.history.length>256)this.history.shift()
   }
   serialize(){
-    return clone({kind:'particle-world',mode:'particle-world',version:2,seed:this.seed,tick:this.tick,
-      ...(this.integrationSubsteps===SUBS?{}:{integrationSubsteps:this.integrationSubsteps}),
+    return clone({kind:'particle-world',mode:'particle-world',version:this.version,seed:this.seed,tick:this.tick,
+      ...(this.version===2&&this.integrationSubsteps===SUBS?{}:{integrationSubsteps:this.integrationSubsteps}),
+      ...(this.version===3?{physicsProfile:this.physicsProfile,integrationDriftEv:this.integrationDriftEv,
+        integrationAbsDriftEv:this.integrationAbsDriftEv}:{}),
       ...(this.benchLegacyOmitted?{}:{reactionBench:this.reactionBench}),
       targetTemperatureK:this.targetTemperatureK,volumeNm3:this.volumeNm3,controls:this.controls,particles:this.particles,
       bonds:this.bonds,observer:this.observer,initialMassU:this.initialMassU,initialEnergyEv:this.initialEnergyEv,
@@ -298,10 +447,14 @@ export class AtomicWorld {
       cumulativeBroken:this.cumulativeBroken,cumulativeUpgraded:this.cumulativeUpgraded,events:this.events,history:this.history,flux:this.flux})
   }
   static restore(d){
-    check(d?.mode==='particle-world'&&d.kind===d.mode&&d.version===2&&integer(d.seed,0,0xffffffff)&&integer(d.tick)&&
+    check(d?.mode==='particle-world'&&d.kind===d.mode&&(d.version===2||d.version===3)&&integer(d.seed,0,0xffffffff)&&integer(d.tick)&&
       Array.isArray(d.particles)&&d.particles.length<=MAX&&Array.isArray(d.bonds)&&d.controls&&controls.every(k=>typeof d.controls[k]==='boolean')&&
       finite(d.targetTemperatureK,1,3000)&&finite(d.volumeNm3,1,512)&&finite(d.initialTemperatureK,1,3000)&&finite(d.initialVolumeNm3,1,512))
-    const w=new AtomicWorld(d.seed,{count:d.particles.length,integrationSubsteps:d.integrationSubsteps,
+    if(d.version===3)check(d.physicsProfile===PROFILES[3]&&[V3_SUBSTEPS,V3_SUBSTEPS*2].includes(d.integrationSubsteps)&&
+      finite(d.integrationDriftEv)&&finite(d.integrationAbsDriftEv,Math.abs(d.integrationDriftEv)-1e-12)&&
+      d.integrationAbsDriftEv>=0&&d.integrationCorrectionEv===0&&d.reactionHeatEv>=-1e-10&&Object.hasOwn(d,'reactionBench'))
+    else check(!Object.hasOwn(d,'physicsProfile')&&!Object.hasOwn(d,'integrationDriftEv')&&!Object.hasOwn(d,'integrationAbsDriftEv'))
+    const w=new AtomicWorld(d.seed,{count:d.particles.length,physicsVersion:d.version,integrationSubsteps:d.integrationSubsteps,
       temperatureK:d.initialTemperatureK,volumeNm3:d.initialVolumeNm3,bindingEnabled:d.controls.bindingEnabled,
       thermostatEnabled:d.controls.thermostatEnabled})
     check(d.initialMassU===w.initialMassU&&finite(d.initialEnergyEv)&&
@@ -319,11 +472,13 @@ export class AtomicWorld {
     for(const b of d.bonds){
       check(integer(b?.a,1,w.particles.length)&&integer(b.b,b.a+1,w.particles.length)&&integer(b.formedAt,1,d.tick))
       const p=w.particles[b.a-1],q=w.particles[b.b-1],key=pairKey(b.a-1,b.b-1)
-      check(!seen.has(key)&&integer(b.order,1,maxBondOrder(p.element,q.element))&&b.energyEv===bondEnergyEv(p.element,q.element,b.order)&&
-        Math.abs(b.rest-w.bondRest(b))<1e-12)
+      check(!seen.has(key)&&integer(b.order,1,maxBondOrder(p.element,q.element))&&b.energyEv===bondEnergyEv(p.element,q.element,b.order))
       seen.add(key);degree[b.a-1]+=b.order;degree[b.b-1]+=b.order
     }
     check(w.particles.every((p,i)=>degree[i]<=ATOMIC_ELEMENTS[p.element].maxValence))
+    w.bonds=clone(d.bonds)
+    check(w.bonds.every(b=>finite(b.rest)&&Math.abs(b.rest-w.bondRest(b))<1e-12))
+    if(w.version===3){w.integrationDriftEv=d.integrationDriftEv;w.integrationAbsDriftEv=d.integrationAbsDriftEv}
     for(const k of ['bathWorkEv','volumeWorkEv','reactionHeatEv','integrationCorrectionEv']){check(finite(d[k]));w[k]=d[k]}
     for(const k of ['cumulativeFormed','cumulativeBroken','cumulativeUpgraded']){check(integer(d[k]));w[k]=d[k]}
     check(d.integrationCorrectionEv>=0&&w.cumulativeFormed-w.cumulativeBroken===d.bonds.length)
@@ -358,7 +513,7 @@ export class AtomicWorld {
       altered.add(key)
     }
     if(d.tick>0)check(finite(d.flux.bathWorkEv)&&finite(d.flux.reactionHeatEv))
-    w.bonds=clone(d.bonds);w.field=forces(w);w.flux=clone(d.flux);w.events=clone(d.events);w.history=clone(d.history)
+    w.field=forces(w);w.flux=clone(d.flux);w.events=clone(d.events);w.history=clone(d.history)
     w.observer=clone(d.observer);check(validateAtomicObservation(w,w.observer)!==false)
     if(Object.hasOwn(d,'reactionBench')){
       check(validateReactionBench(w,d.reactionBench))
@@ -367,7 +522,7 @@ export class AtomicWorld {
       w.reactionBench=updateReactionBench(w)
       w.benchLegacyOmitted=true
     }
-    const m=w.getMetrics();check(Math.abs(m.energyError)<1e-7*Math.max(1,Math.abs(w.initialEnergyEv),Math.abs(w.volumeWorkEv),Math.abs(w.reactionHeatEv)))
+    const m=w.getMetrics();check(Math.abs(m.ledgerResidualEv)<1e-7*Math.max(1,Math.abs(w.initialEnergyEv),Math.abs(w.volumeWorkEv),Math.abs(w.reactionHeatEv)))
     const last=w.history.at(-1)
     if(last.tick===w.tick)for(const key of Object.keys(last)){
       check(finite(last[key])&&finite(m[key])&&Math.abs(last[key]-m[key])<1e-8*Math.max(1,Math.abs(m[key])))
@@ -379,9 +534,9 @@ export class AtomicWorld {
 // Isolated diagnostic fixture. Both the potential and the integrator below
 // are the production implementations. No free-atom trajectory is overwritten
 // and this prepared topology never enters the checkpoint/archive protocol.
-export function createMolecularReferenceFixture(formula,integrationSubsteps=4) {
-  check(['H2','H2O'].includes(formula) && [4,8].includes(integrationSubsteps))
-  const world=new AtomicWorld(0,{count:0,volumeNm3:8,integrationSubsteps,
+export function createMolecularReferenceFixture(formula,integrationSubsteps,physicsVersion=3) {
+  check(['H2','H2O'].includes(formula))
+  const world=new AtomicWorld(0,{count:0,volumeNm3:8,integrationSubsteps,physicsVersion,
     temperatureK:1,bindingEnabled:false,thermostatEnabled:false})
   const symbols=formula==='H2'?['H','H']:['O','H','H']
   world.particles=symbols.map((symbol,i)=>{
@@ -389,31 +544,35 @@ export function createMolecularReferenceFixture(formula,integrationSubsteps=4) {
     return {id:i+1,element:symbol,mass:e.massU,massU:e.massU,radiusPm:e.covalentRadiusPm,protons:e.protons,
       neutrons:e.neutrons,electrons:e.electrons,charge:0,x:0.5,y:0.5,z:0.5,vx:0,vy:0,vz:0}
   })
-  world.bonds=symbols.slice(1).map((symbol,i)=>{
-    const bond={a:1,b:i+2,order:1,formedAt:0,energyEv:bondEnergyEv(symbols[0],symbol,1)}
-    bond.rest=world.bondRest(bond)
-    return bond
-  })
-  function reset(coordinatesNm) {
+  world.bonds=symbols.slice(1).map((symbol,i)=>({a:1,b:i+2,order:1,formedAt:0,energyEv:bondEnergyEv(symbols[0],symbol,1)}))
+  for(const bond of world.bonds)bond.rest=world.bondRest(bond)
+  function reset(coordinatesNm,velocitiesNmFs) {
     check(coordinatesNm.length===symbols.length)
+    if(velocitiesNmFs)check(velocitiesNmFs.length===symbols.length)
     for(let i=0;i<symbols.length;i++){
       const p=world.particles[i]
       check(coordinatesNm[i].length===3)
       for(let k=0;k<3;k++){
         check(finite(coordinatesNm[i][k],-0.8,0.8))
         p[keys[k]]=0.5+coordinatesNm[i][k]/world.sideNm
-        p[vk[k]]=0
+        const speed=velocitiesNmFs?velocitiesNmFs[i]?.[k]:0
+        check(finite(speed,-1,1))
+        p[vk[k]]=speed
       }
     }
     world.field=forces(world)
     world.integrationCorrectionEv=0
-    world.initialEnergyEv=world.field.potential
+    world.initialEnergyEv=world.field.potential+energyK(world.particles)
     return world.initialEnergyEv
   }
   function sample() {
     return {coordinatesNm:world.particles.map(p=>keys.map(k=>(p[k]-0.5)*world.sideNm)),
+      forcesEvPerNm:world.particles.map((p,i)=>Array.from(world.field.f.subarray(3*i,3*i+3))),
+      velocitiesNmFs:world.particles.map(p=>vk.map(k=>p[k])),kineticEnergyEv:energyK(world.particles),
+      potentialEnergyEv:world.field.potential,
       energyEv:world.field.potential+energyK(world.particles),correctionEv:world.integrationCorrectionEv}
   }
-  return Object.freeze({formula,integrationSubsteps,dtFs:world.integrationDtFs,reset,sample,
+  return Object.freeze({formula,physicsProfile:world.physicsProfile,version:world.version,
+    integrationSubsteps:world.integrationSubsteps,dtFs:world.integrationDtFs,reset,sample,
     advance(){world.integrate(); return sample()}})
 }

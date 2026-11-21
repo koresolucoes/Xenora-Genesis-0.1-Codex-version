@@ -257,7 +257,13 @@ test("atomic archive reports elemental stocks and measured connected components 
   const input={mode:"particle-world",worldId:randomUUID(),runId:randomUUID(),checkpoint:world.serialize()};
   const save=body=>app.fetch(request("",{method:"POST",token:"b".repeat(64),operation:randomUUID(),body}),env);
   assert.equal((await save(input)).status,201);
-  assert.equal(saved.run.engineVersion,"particle-world-v2");
+  assert.equal(saved.run.engineVersion,"particle-world-v3");
+  assert.equal(saved.checkpoint.version,3);
+  assert.equal(saved.checkpoint.physicsProfile,"neutral-chonps-h2-h2o-v3");
+  assert.equal(saved.samples[0].data.physicsProfile,saved.checkpoint.physicsProfile);
+  assert.equal(saved.samples[0].data.integrationSubsteps,16);
+  assert.equal(saved.samples[0].data.integrationDriftEv,saved.checkpoint.integrationDriftEv);
+  assert.equal(saved.samples[0].data.integrationAbsDriftEv,saved.checkpoint.integrationAbsDriftEv);
   assert.deepEqual(saved.checkpoint,input.checkpoint);
   assert.deepEqual(saved.genealogy,[]);
   assert.equal(saved.samples[0].data.atomCount,world.particles.length);
@@ -271,6 +277,12 @@ test("atomic archive reports elemental stocks and measured connected components 
   const observed=world.molecules().filter(m=>m.members.length>1);
   assert.deepEqual(saved.events.map(e=>[e.tick,e.data.formula,e.data.members]),observed.map(m=>[world.tick,m.formula,[...m.members].sort((a,b)=>a-b)]));
   assert.equal((await save({...input,checkpoint:{...input.checkpoint,version:1}})).status,422);
+  for(const patch of [{version:2},{physicsProfile:"neutral-chonps-v2"},{integrationSubsteps:4}]){
+    assert.equal((await save({...input,checkpoint:{...input.checkpoint,...patch}})).status,422);
+  }
+  const refined=new AtomicWorld(42,{integrationSubsteps:32});
+  assert.equal((await save({...input,checkpoint:refined.serialize()})).status,201);
+  assert.equal(saved.samples[0].data.integrationSubsteps,32);
   const broken=structuredClone(input);
   broken.checkpoint.particles[0].element="Q";
   assert.equal((await save(broken)).status,422);
@@ -299,6 +311,10 @@ test("a pre-bench atomic checkpoint still generates its original idempotent scie
   const resumed=AtomicWorld.restore(fixture);
   resumed.step();
   assert.equal((await save({...input,checkpoint:resumed.serialize()})).status,201);
+  const {run:oldRun,...withBench}=saved;
+  assert.equal(oldRun.engineVersion,"particle-world-v2");
+  const benchHash=createHash("sha256").update(JSON.stringify(sorted({engineVersion:oldRun.engineVersion,...withBench}))).digest("hex");
+  assert.equal(benchHash,"8d9e0473c6e8ad4e7a818f7729c95647aaed3b463144ec2b44e72b29bd1ce3e4");
   const sample=saved.samples[0].data;
   assert.equal(sample.reactionWindow.startTick,fixture.tick);
   assert.equal(sample.reactionWindow.endTick,resumed.tick);
@@ -309,6 +325,10 @@ test("a pre-bench atomic checkpoint still generates its original idempotent scie
   for(const entry of saved.events) {
     if(entry.data.speciesIndex!==null)assert.equal(entry.data.formula,identified[entry.data.speciesIndex].formula);
   }
+  const future=AtomicWorld.restore(resumed.serialize());
+  for(let i=0;i<20;i++)future.step();
+  const futureHash=createHash("sha256").update(JSON.stringify(sorted(future.serialize()))).digest("hex");
+  assert.equal(futureHash,"0390af0e889d867cc34ca2573a0a72829529630961ce55c7a98232aed72d0151");
   const broken=resumed.serialize();
   broken.reactionBench.tick++;
   assert.equal((await save({...input,checkpoint:broken})).status,422);

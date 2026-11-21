@@ -17,6 +17,16 @@ function near(actual, expected, tolerance = 1e-8) {
     `${actual} vs ${expected}`,
   );
 }
+// Drift is reported by unprojected integration. All heat/work is external and
+// must reconcile with the independent energy balance to machine precision.
+function checkEnergyLedger(world) {
+  const m = world.getMetrics();
+  const balance = m.totalEnergyEv - world.initialEnergyEv - m.bathWorkEv - m.volumeWorkEv + m.reactionHeatEv;
+  near(m.energyError, balance, 1e-7);
+  near(balance, m.integrationDriftEv, 1e-7);
+  assert.ok(m.integrationAbsDriftEv + 1e-8 >= Math.abs(balance));
+  assert.equal(m.integrationCorrectionEv, 0);
+}
 function materialIdentity(world) {
   return world.particles.map((p) => [
     p.id,
@@ -127,7 +137,7 @@ function checkElementsAndCharge(world, original) {
   near(metrics.totalEnergyEv, metrics.kineticEnergyEv + metrics.potentialEnergyEv);
   near(
     metrics.totalEnergyEv + metrics.reactionHeatEv,
-    metrics.initialEnergyEv + metrics.bathWorkEv + metrics.volumeWorkEv,
+    metrics.initialEnergyEv + metrics.bathWorkEv + metrics.volumeWorkEv + metrics.integrationDriftEv,
   );
   near(
     metrics.totalMassU,
@@ -189,7 +199,7 @@ test("thermal and volume interventions preserve each isotope and charge and resp
         checkElementsAndCharge(world, original);
         checkBonds(world);
         checkMoleculeObservations(world);
-        near(world.getMetrics().energyError, 0, 1e-7);
+        checkEnergyLedger(world);
       }
     }
   }
@@ -205,7 +215,7 @@ test("thermal and volume interventions preserve each isotope and charge and resp
   advance(world, 25);
   checkBonds(world);
   checkElementsAndCharge(world, original);
-  near(world.getMetrics().energyError, 0, 1e-7);
+  checkEnergyLedger(world);
 });
 
 test("bonding off preserves the same initial atoms and keeps every molecule a singleton", () => {
@@ -236,7 +246,7 @@ test("uncoupling the thermostat leaves the kinetic bath ledger constant while re
   advance(separated, 200);
   assert.equal(separated.getMetrics().bathWorkEv, ledger);
   assert.ok(Math.abs(coupled.getMetrics().bathWorkEv - ledger) > 1e-7);
-  near(separated.getMetrics().energyError, 0, 1e-7);
+  checkEnergyLedger(separated);
 });
 
 test("checkpoint replay reproduces the physical trajectory independently of inspecting molecules", () => {

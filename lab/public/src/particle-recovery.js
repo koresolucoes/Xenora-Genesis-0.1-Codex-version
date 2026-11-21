@@ -10,6 +10,7 @@ function display(data){
   const mode=snapshot.mode || snapshot.kind || (snapshot.organisms ? "lagoon-molecular" : "registro");
   const labels={"evolving-world":"População com fundadores introduzidos","primordial":"Cronologia primordial","lagoon-molecular":"Cultura molecular","particle-world":"Mundo de partículas"};
   const rows=[["Modelo de origem",labels[mode] || mode],["Versão",snapshot.version ?? "não registrada"],["Semente",snapshot.seed ?? "não registrada"],["Passo",snapshot.tick ?? "não registrado"]];
+  if(mode==="particle-world"&&snapshot.version>=2)rows.push(["Perfil declarado",snapshot.physicsProfile || "neutral-chonps-v2"]);
   if(Array.isArray(snapshot.organisms))rows.push(["Indivíduos salvos",snapshot.organisms.length]);
   if(Array.isArray(snapshot.particles))rows.push(["Partículas salvas",snapshot.particles.length]);
   const info=by("recovery-info");info.replaceChildren();

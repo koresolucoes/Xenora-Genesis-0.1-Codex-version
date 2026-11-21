@@ -150,3 +150,11 @@ body.pw-focus .pw-laboratory{grid-row:2/4}
 .mb-result table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}
 .mb-result th,.mb-result td{padding:5px 3px;border-bottom:1px solid var(--line);text-align:right}
 .mb-result th:first-child,.mb-result td:first-child{text-align:left}
+.pw-field-context{display:flex;align-items:center;flex-wrap:wrap;gap:2px 9px;margin-top:6px;color:var(--muted);font-size:14px}
+#pw-profile{color:var(--ink);font:13px var(--mono)}
+#pw-profile::after{content:"·";margin-left:9px;color:var(--muted)}
+#pw-new-profile{padding:0;border:0;background:transparent;color:var(--mint);text-decoration:underline;text-underline-offset:3px;min-height:25px;font-size:14px}
+@media(max-width:700px){.pw-field-context{margin-top:2px;font-size:12px;gap:2px 5px}#pw-profile{font-size:12px}#pw-profile::after{margin-left:5px}}
+.mb-measure-role{display:block;color:var(--mint);margin:3px 0;text-transform:capitalize}
+.mb-reference-summary{margin:7px 0}
+#mb-reference-result>h4{margin:9px 0 2px}

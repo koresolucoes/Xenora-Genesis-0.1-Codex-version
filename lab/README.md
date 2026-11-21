@@ -8,19 +8,19 @@ A partir de `lab/`, execute `npm ci` e `npm test`. Para explorar a interface loc
 
 `atomic-elements.js` registra número atômico, prótons, nêutrons, elétrons, massa isotópica, raio covalente de referência e limite de valência. As fontes são NIST, Cordero et al. e OpenStax. Os núcleos conservam a identidade. Os quarks de valência dos núcleons aparecem como composição de referência. Suas interações nucleares requerem outra escala de modelo.
 
-O grafo químico usa ligações covalentes simplificadas com ordens permitidas e energias médias de dissociação. Ele conserva elementos, núcleos e elétrons. Cada componente informa fórmula, massa e constituintes. A fórmula bruta permite consultar a composição. A identificação de uma substância exige também sua estrutura e distribuição eletrônica.
+O grafo químico usa ligações covalentes com ordens permitidas e energias médias de dissociação. O perfil v3 aplica potenciais ajustados às topologias isoladas de H₂ e H₂O. As demais interações CHONPS continuam exploratórias. Ele conserva elementos, núcleos e elétrons. Cada componente informa fórmula, massa e constituintes. A fórmula bruta permite consultar a composição. A identificação de uma substância exige também sua estrutura e distribuição eletrônica.
 
 A interface mede volume do recipiente, massa e densidade. A comparação de pressão do gás ideal usa o número de componentes moleculares independentes. O raio covalente define um volume geométrico de referência para cada átomo. O volume de uma amostra depende também do arranjo e das condições físicas. A fase macroscópica permanece sem classificação até que um modelo de interação e equilíbrio valide essa análise.
 
-A integração usa partículas clássicas e potenciais efetivos. Um corretor da energia cinética fecha o saldo numérico e registra a correção acumulada. O calor liberado ou absorvido nas mudanças de ligação é acompanhado em um reservatório explícito de reação. A alteração do volume reescala as posições e registra a mudança de potencial como trabalho. Esses mecanismos permitem verificar a contabilidade. Previsões quantitativas de cinética ou propriedades de substâncias exigem validação adicional do modelo.
+A integração v3 usa velocity-Verlet com subpassos de 0,30 fs por padrão, mantendo o passo macroscópico de 4,8 fs. A deriva de energia é medida diretamente. O relatório mostra o saldo físico bruto, a deriva assinada e absoluta e o fechamento contábil após registrá-la. O calor nas mudanças de ligação acompanha a diferença do potencial molecular completo. O v2 conserva a projeção de energia e os parâmetros originais para reproduzir seus arquivos. A alteração instantânea do volume reescala as posições e contabiliza a mudança de potencial como trabalho.
 
 ## Um motor e uma observação
 
 `atomic-world.js` implementa a dinâmica do mundo. As operações do observador não criam estruturas e não alteram as forças. Uma ligação muda a composição do componente molecular. Movimento, compressão do recipiente e troca de calor alteram as condições físicas. As alterações da fonte e do recipiente têm contabilização explícita.
 
-A cena permite selecionar átomos, ligações e moléculas no mesmo passo. Os controles alteram condições do mesmo mundo. O inventário e o arquivo usam o formato `particle-world`, versão 2, com identidade do motor `particle-world-v2`. A sessão local e os ramos preservam seus constituintes.
+A cena permite selecionar átomos, ligações e moléculas no mesmo passo. Os controles alteram condições do mesmo mundo. O inventário e o arquivo usam o formato `particle-world`, com `particle-world-v3` para as execuções calibradas e `particle-world-v2` para os arquivos anteriores. O perfil e o número de subpassos são fixos por execução. A sessão local identifica a versão em cada ramo. Ao abrir um v2, **Nova execução v3 com esta semente** inicia uma execução independente e comparável.
 
-Para atualizar um banco que já aplicou a migração 002, aplique `migrations/003-atomic-world.sql`. Instalações novas usam `schema-supabase.sql` e `schema-origins.sql`.
+Para atualizar um banco que já aplicou a migração 002, aplique, em ordem, `migrations/003-atomic-world.sql`, `migrations/004-reaction-bench.sql` e `migrations/005-calibrated-atomic-world.sql`. Instalações novas usam `schema-supabase.sql` e `schema-origins.sql`.
 
 ## Bancada de reações moleculares
 
@@ -32,19 +32,28 @@ A exportação CSV leva o intervalo, as contagens e os resultados de persistênc
 
 ### Ensaios H₂ e H₂O
 
-Em **Bancada**, use **Medir H₂ e H₂O**. O ensaio prepara moléculas isoladas de topologia fixa e usa o potencial e o integrador do motor. A comparação usa o mesmo tempo físico, 480 fs, com subpassos de 1,2 e 0,6 fs e 401 amostras por trajetória. As tolerâncias de triagem adotadas são 2% para comprimento, 3° para ângulo e 10% para frequência. Elas são critérios do modelo. A referência não modifica o mundo em foco.
+Em **Bancada**, use **Medir H₂ e H₂O**. O ensaio usa o perfil do mundo em foco e informa sua versão. As moléculas são preparadas isoladamente, com topologia fixa, sem banho térmico. As mesmas forças do motor são avaliadas durante 480 fs, com 401 amostras por trajetória.
 
-| Medida | Motor atual | Referência | Resultado da triagem |
+Na v3, os passos internos são 0,30 e 0,15 fs. O ajuste usa a geometria, a frequência harmônica de H₂ e dois modos da água. O modo simétrico da água é uma referência reservada para avaliar a previsão. As tolerâncias de triagem continuam 2% para comprimento, 3° para ângulo e 10% para frequência. A variação espectral entre os passos deve ser inferior a 1%.
+
+| Medida v3 | Resultado | Referência | Papel |
 | --- | --- | --- | --- |
-| Comprimento H–H | 0,062000 nm | 0,074144 nm | Inadequado |
-| Frequência harmônica de H₂, pela curvatura | 943,614 cm⁻¹ | 4.401,213 cm⁻¹ | Inadequado |
-| Frequência de H₂, pela trajetória | Sem medida confiável | 4.401,213 cm⁻¹ | Sem medida |
-| Comprimento O–H | 0,097000 nm | 0,095777 nm | Aceito |
-| Ângulo H–O–H | 60,406° | 104,48° | Inadequado |
+| Comprimento H–H | 0,074144 nm | 0,074144 nm | Ajuste |
+| Frequência de H₂ por curvatura | 4.401,216 cm⁻¹ | 4.401,213 cm⁻¹ | Ajuste |
+| Frequência de H₂ pela trajetória fina | 4.403,768 cm⁻¹ | 4.401,213 cm⁻¹ | Verificação numérica |
+| Comprimento O–H | 0,095777 nm | 0,095777 nm | Ajuste |
+| Ângulo H–O–H | 104,4800° | 104,48° | Ajuste |
+| Flexão da água ν₂, trajetória fina | 1.649,130 cm⁻¹ | 1.649 cm⁻¹ | Ajuste |
+| Estiramento antissimétrico ν₃, trajetória fina | 3.945,271 cm⁻¹ | 3.943 cm⁻¹ | Ajuste |
+| Estiramento simétrico ν₁, trajetória fina | 3.888,454 cm⁻¹ | 3.832 cm⁻¹ | Referência reservada |
 
-O integrador repetiu posições em 284 de 400 subpassos de H₂ e em 654 de 800 ao reduzir o passo. A comparação exibe esse dado junto da correção energética acumulada. O saldo energético fechado precisa ser interpretado com essas medições. Esses resultados delimitam falhas atuais de geometria e dinâmica. [Referência de H₂](https://webbook.nist.gov/cgi/cbook.cgi?ID=C1333740&Mask=1000) · [Geometria espectroscópica da água](https://doi.org/10.1063/1.1924506)
+O resultado reservado apresentou diferença de 1,47%. A redução do passo alterou as frequências em até 0,194%, sem subpassos imóveis ou projeção da energia cinética. O erro mecânico máximo nas trajetórias isoladas foi de 2,77×10⁻⁷ eV para H₂ e 6,63×10⁻⁷ eV para H₂O. A Hessiana cartesiana, as forças por diferenças finitas e a reversão de velocidades são verificações independentes do integrador.
 
-Para reproduzir o relatório JSON, execute `node test/experiments/molecular-reference.mjs` em `lab/`. O número de subpassos é fixo em cada execução. Checkpoints anteriores usam quatro. O protocolo da bancada inclui a migração incremental `migrations/004-reaction-bench.sql`, aplicada após a 003.
+O domínio avaliado compreende geometrias e pequenas vibrações de H₂ e H₂O isoladas em fase gasosa. As taxas de reação, limiares de dissociação, outras moléculas e propriedades da água líquida requerem seus próprios ensaios. Os valores espectroscópicos usados são harmônicos. [NIST H₂](https://webbook.nist.gov/cgi/cbook.cgi?ID=C1333740&Mask=1000) · [NIST H₂O](https://cccbdb.nist.gov/exp2x.asp?casno=7732185) · [Geometria espectroscópica da água](https://doi.org/10.1063/1.1924506)
+
+O diagnóstico v2 continua disponível quando esse perfil está em foco. Ele reproduz o comprimento H–H de 0,062 nm, a curvatura de 943,614 cm⁻¹ e o ângulo da água de 60,406°, com a frequência dinâmica de H₂ sem medida confiável.
+
+Para reproduzir o relatório JSON v3, execute `node test/experiments/molecular-reference.mjs` em `lab/`. Para diagnóstico v2, chame `runMolecularReference({physicsVersion:2})` do módulo. O protocolo de arquivos do novo perfil inclui a migração incremental `migrations/005-calibrated-atomic-world.sql`, aplicada após a 004.
 
 ## Limite científico atual
 
@@ -89,9 +98,9 @@ Na época de lagoa, um domínio local representa a superfície com 120 partícul
 
 ## Arquivo científico no Supabase
 
-Em instalações novas, aplique `schema-supabase.sql` e em seguida `schema-origins.sql`, no mesmo projeto. Em arquivos existentes, aplique as migrações pendentes em ordem. `migrations/001-evolving-world.sql` habilita o mundo evolutivo. `migrations/002-particle-world.sql` acrescenta o mundo de partículas e preserva mundos, chaves e revisões. A migração `migrations/003-atomic-world.sql` acrescenta o motor atômico v2 ao mesmo modo. Cada revisão v2 registra o inventário H, C, N, O, P e S, a massa em unidades atômicas e as fórmulas dos componentes ligados no passo salvo. O histórico de medições pode ser consultado entre revisões. O arquivo usa o gateway privado já configurado. Na interface de cada laboratório, **Salvar revisão** cria um mundo e um ramo ou acrescenta uma revisão à execução aberta. Em **Chave e histórico de revisões**, copie a chave para poder recuperar o mundo em outro navegador, abra um passo anterior e bifurque o ramo. A chave concede leitura e escrita nesse mundo. Uma chave anterior de checkpoint continua válida na opção **Experimento** da lagoa.
+Em instalações novas, aplique `schema-supabase.sql` e em seguida `schema-origins.sql`, no mesmo projeto. Em arquivos existentes, aplique as migrações pendentes em ordem. `migrations/001-evolving-world.sql` habilita o mundo evolutivo. `migrations/002-particle-world.sql` acrescenta o mundo de partículas e preserva mundos, chaves e revisões. A migração `migrations/003-atomic-world.sql` acrescenta o motor atômico v2 ao mesmo modo. Cada revisão v2 registra o inventário H, C, N, O, P e S, a massa em unidades atômicas e as fórmulas dos componentes ligados no passo salvo. A migração `migrations/004-reaction-bench.sql` acrescenta a janela molecular e fixa os subpassos por execução. A migração `migrations/005-calibrated-atomic-world.sql` habilita o perfil v3 e seus registros de deriva, preservando as execuções e os recibos anteriores. O histórico de medições pode ser consultado entre revisões. O arquivo usa o gateway privado já configurado. Na interface de cada laboratório, **Salvar revisão** cria um mundo e um ramo ou acrescenta uma revisão à execução aberta. Em **Chave e histórico de revisões**, copie a chave para poder recuperar o mundo em outro navegador, abra um passo anterior e bifurque o ramo. A chave concede leitura e escrita nesse mundo. Uma chave anterior de checkpoint continua válida na opção **Experimento** da lagoa.
 
-As rotas sob `/api/worlds` aceitam os modos `primordial` e `lagoon-molecular`. O cliente gera os identificadores e o segredo do mundo antes do envio. A escrita usa um identificador de operação estável e a revisão esperada. O Worker restaura o estado, calcula as observações e envia o lote. O PostgreSQL arquiva a revisão e o recibo em uma transação. Uma repetição idêntica recebe o mesmo recibo, e uma escrita obsoleta recebe HTTP 409. Um fork copia o estado e as observações da revisão de origem. Uma revisão pode ser consultada independentemente do ramo corrente.
+As rotas sob `/api/worlds` aceitam os modos `primordial`, `lagoon-molecular`, `evolving-world` e `particle-world`. O cliente gera os identificadores e o segredo do mundo antes do envio. A escrita usa um identificador de operação estável e a revisão esperada. O Worker restaura o estado, calcula as observações e envia o lote. O PostgreSQL arquiva a revisão e o recibo em uma transação. Uma repetição idêntica recebe o mesmo recibo, e uma escrita obsoleta recebe HTTP 409. Um fork copia o estado e as observações da revisão de origem. Uma revisão pode ser consultada independentemente do ramo corrente.
 
 As tabelas `science_worlds`, `science_runs`, `science_revisions`, `science_observations` e `science_requests` estão no esquema `xenora_private`. As observações preservam amostras, procedência de minerais, inventários, eventos e evidência genealógica presente nas revisões enviadas. As janelas do motor são limitadas e grandes intervalos sem envio podem deixar lacunas. A opção de salvamento periódico exige uma revisão inicial, uma aba aberta e conexão. O motor roda no navegador.
 

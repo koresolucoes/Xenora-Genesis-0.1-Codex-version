@@ -23,7 +23,7 @@
   </header>
   <main class="pw-laboratory">
     <section class="pw-field" aria-labelledby="pw-title">
-      <div class="pw-field-head"><div><h2 id="pw-title">Laboratório da matéria</h2><p>Átomos, moléculas e energia · modelo atomístico simplificado</p></div>
+      <div class="pw-field-head"><div><h2 id="pw-title">Laboratório da matéria</h2><div class="pw-field-context"><span id="pw-profile"></span><span>Química exploratória de H, C, N, O, P e S</span><button type="button" id="pw-new-profile" title="Abre outra execução no passo zero com a semente, o inventário inicial, a temperatura e o volume iniciais e os controles em foco." hidden>Nova execução v3 com esta semente</button></div></div>
         <button type="button" id="pw-fullscreen" aria-label="Alternar tela cheia" title="Tela cheia">⛶</button></div>
       <div class="pw-stage">
         <canvas id="pw-map" tabindex="0" aria-label="Campo de átomos. Clique para inspecionar. Com ampliação, arraste ou use as setas para deslocar o campo. Use o inspetor para selecionar por identificador."></canvas>
@@ -52,7 +52,7 @@
           <div class="pw-panel-block"><h2>Condições do recipiente</h2><p>Controle a temperatura-alvo e o volume do mesmo campo.</p>
             <form id="pw-environment-form" class="pw-environment-form"><label>Temperatura-alvo (K)<input type="number" id="pw-temperature" min="1" max="3000" step="any" required></label><label>Volume (nm³)<input type="number" id="pw-volume" min="1" max="512" step="any" required></label><label class="pw-check"><input id="pw-binding" type="checkbox" checked> Permitir formação de ligações</label><button type="submit" id="pw-apply">Aplicar condições</button></form>
             <dl class="pw-data" id="pw-energy"></dl><p id="pw-phase-reason"></p></div>
-          <div class="pw-panel-block"><details><summary>Novo mundo e ramos</summary><form id="pw-new"><label>Semente <input id="pw-seed" type="number" min="0" max="4294967295" step="1" value="42" required></label><button type="submit">Abrir no passo zero</button></form><div id="particle-session"></div></details></div>
+          <div class="pw-panel-block"><details><summary>Novo mundo e ramos</summary><form id="pw-new"><label>Semente <input id="pw-seed" type="number" min="0" max="4294967295" step="1" value="42" required></label><button type="submit">Iniciar nova execução v3</button></form><div id="particle-session"></div></details></div>
           <div class="pw-panel-block"><details><summary>Referências físicas e químicas</summary><ul id="pw-sources"></ul></details></div><div class="pw-panel-block"><details><summary>Arquivos e revisões</summary><section id="world-archive" aria-label="Arquivo do mundo atômico"></section><a href="./recovery.html">Recuperar arquivo anterior</a></details></div>
         </section>
         <section id="pw-panel-bench" role="tabpanel" aria-labelledby="pw-tab-bench" hidden><div id="molecular-bench"></div></section>

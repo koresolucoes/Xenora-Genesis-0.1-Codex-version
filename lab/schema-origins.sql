@@ -503,11 +503,15 @@ BEGIN
     IF r.mode='particle-world' AND (
        checked->>'mode' IS DISTINCT FROM 'particle-world' OR checked->>'kind' IS DISTINCT FROM 'particle-world'
        OR NOT ((checked->'version' IS NOT DISTINCT FROM '1'::jsonb AND r.engine_version='particle-world-v1')
-               OR (checked->'version' IS NOT DISTINCT FROM '2'::jsonb AND r.engine_version='particle-world-v2'))
+               OR (checked->'version' IS NOT DISTINCT FROM '2'::jsonb AND r.engine_version='particle-world-v2'
+                   AND NOT (checked ? 'physicsProfile'))
+               OR (checked->'version' IS NOT DISTINCT FROM '3'::jsonb AND r.engine_version='particle-world-v3'
+                   AND checked->>'physicsProfile' IS NOT DISTINCT FROM 'neutral-chonps-h2-h2o-v3'
+                   AND coalesce(checked->'integrationSubsteps','null'::jsonb) IN ('16'::jsonb,'32'::jsonb)))
        OR jsonb_typeof(checked->'seed') IS DISTINCT FROM 'number'
        OR jsonb_typeof(checked->'particles') IS DISTINCT FROM 'array'
        OR jsonb_typeof(checked->'bonds') IS DISTINCT FROM 'array') THEN
-        RAISE EXCEPTION 'Invalid particle-world v1 checkpoint' USING ERRCODE='PT400';
+        RAISE EXCEPTION 'Invalid particle-world checkpoint or physics profile' USING ERRCODE='PT400';
     END IF;
     IF r.engine_version='particle-world-v1' AND r.mode='particle-world' AND p_action<>'fork' AND (
        p_body->'genealogy' IS DISTINCT FROM '[]'::jsonb OR p_body->'minerals' IS DISTINCT FROM '[]'::jsonb
@@ -541,12 +545,22 @@ BEGIN
             RAISE EXCEPTION 'Particle inventory does not match checkpoint' USING ERRCODE='PT400';
         END IF;
     END IF;
-    IF r.mode='particle-world' AND r.engine_version='particle-world-v2' AND p_action<>'fork' THEN
-        IF coalesce(checked->'integrationSubsteps','4'::jsonb) NOT IN ('4'::jsonb,'8'::jsonb) THEN
+    IF r.mode='particle-world' AND r.engine_version IN ('particle-world-v2','particle-world-v3') AND p_action<>'fork' THEN
+        IF r.engine_version='particle-world-v2' AND coalesce(checked->'integrationSubsteps','4'::jsonb) NOT IN ('4'::jsonb,'8'::jsonb) THEN
             RAISE EXCEPTION 'Invalid atomic integration step' USING ERRCODE='PT400';
         END IF;
         IF p_action='append' AND coalesce(checked->'integrationSubsteps','4'::jsonb) IS DISTINCT FROM prior_substeps THEN
             RAISE EXCEPTION 'Integration step changed within run' USING ERRCODE='PT409';
+        END IF;
+        IF r.engine_version='particle-world-v3' AND (
+            p_body#>'{samples,0,data,physicsProfile}' IS DISTINCT FROM checked->'physicsProfile'
+            OR p_body#>'{samples,0,data,integrationSubsteps}' IS DISTINCT FROM checked->'integrationSubsteps'
+            OR jsonb_typeof(checked->'integrationDriftEv') IS DISTINCT FROM 'number'
+            OR jsonb_typeof(checked->'integrationAbsDriftEv') IS DISTINCT FROM 'number'
+            OR p_body#>'{samples,0,data,integrationDriftEv}' IS DISTINCT FROM checked->'integrationDriftEv'
+            OR p_body#>'{samples,0,data,integrationAbsDriftEv}' IS DISTINCT FROM checked->'integrationAbsDriftEv'
+        ) THEN
+            RAISE EXCEPTION 'Measurement does not match calibrated physics profile' USING ERRCODE='PT400';
         END IF;
         PERFORM xenora_private.validate_atomic_projection(checked,p_body);
     END IF;
@@ -570,10 +584,13 @@ BEGIN
         WHERE world_id=p_world AND run_id=pid AND revision=src_rev ORDER BY id;
     ELSE
         cov:=xenora_private.science_project(p_world,rid,rev,r.mode,t,checked,p_body);
-        IF r.mode='particle-world' AND r.engine_version='particle-world-v2' THEN
-            cov:=cov||jsonb_build_object('genealogyBasis','not projected in atomic version 2',
+        IF r.mode='particle-world' AND r.engine_version IN ('particle-world-v2','particle-world-v3') THEN
+            cov:=cov||jsonb_build_object('genealogyBasis','not projected in atomic version '||(checked->>'version'),
                 'sampleBasis','validated checkpoint tick','eventBasis','connected molecules observed at checkpoint tick');
             cov:=cov||xenora_private.atomic_bench_coverage(checked,p_body);
+            IF r.engine_version='particle-world-v3' THEN
+                cov:=cov||jsonb_build_object('physicsProfile',checked->'physicsProfile');
+            END IF;
         ELSIF r.mode='particle-world' THEN
             cov:=cov||jsonb_build_object('genealogyBasis','not projected in particle-world-v1',
                 'sampleBasis','validated checkpoint tick','eventBasis','past events not independently replayed');

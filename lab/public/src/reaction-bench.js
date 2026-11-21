@@ -306,7 +306,9 @@ export function getReactionBenchReport(world) {
   }
   for (const episode of open.values()) measureStay(episode,tick,true,tickFs);
   const groups = [...groupsByKey.values()].sort((a,b)=>b.occurrences-a.occurrences || b.lastTick-a.lastTick || byText(a.key,b.key));
-  return {startTick,tick,tickFs,windowFromFs:startTick*tickFs,windowToFs:tick*tickFs,coverageFs:(tick-startTick)*tickFs,
+  return {startTick,tick,tickFs,physicsVersion:world.version ?? null,physicsProfile:world.physicsProfile ?? null,
+    integrationDtFs:world.integrationDtFs ?? null,
+    windowFromFs:startTick*tickFs,windowToFs:tick*tickFs,coverageFs:(tick-startTick)*tickFs,
     comparedSteps:tick-startTick,silentTicks:tick-startTick-frames.length,eventCount,unresolvedEvents,
     baselineMolecules:atStart.length,survivingBaselineMolecules:preexisting.size,
     windowsFs:[...windowsFs],groups,recentEvents};

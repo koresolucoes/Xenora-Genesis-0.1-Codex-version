@@ -57,7 +57,7 @@ export function mountParticleSession(root,{getWorld,setWorld,setPaused=()=>{},on
     list.replaceChildren();
     for(const entry of data.entries) {
       const row=document.createElement("li"),button=document.createElement("button"),line=document.createElement("p");
-      button.type="button";button.textContent=entry.name+" · passo "+entry.tick;
+      button.type="button";button.textContent=entry.name+" · perfil v"+entry.snapshot.version+" · passo "+entry.tick;
       button.disabled=entry.id===data.focus;
       if(button.disabled)button.setAttribute("aria-current","true");
       line.textContent=entry.parent ? "Derivado de "+entry.parent.name+" no passo "+entry.parent.tick+"." : "Origem independente · semente "+entry.snapshot.seed+".";
