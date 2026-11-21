@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1716">
+  <title>Xenora Genesis · Laboratório da matéria</title>
+  <link rel="icon" type="image/svg+xml" href="./assets/icon.svg">
+  <link rel="stylesheet" href="./particles.css">
+  <link rel="stylesheet" href="./world-archive.css">
+</head>
+<body>
+  <header class="pw-header">
+    <h1><span class="pw-brand-symbol" aria-hidden="true">✳</span><span>Xenora <strong>Genesis</strong></span></h1>
+    <div class="pw-world"><span>Semente <b id="pw-seed-label">—</b></span><span>Passo <b id="pw-tick">—</b></span><span id="pw-physical-time">—</span></div>
+    <div class="pw-transport" aria-label="Tempo do mundo">
+      <span class="pw-status" id="pw-status">Preparando</span>
+      <button class="pw-main-button" type="button" id="pw-play">Iniciar</button>
+      <button type="button" id="pw-step">1 passo</button>
+      <button type="button" id="pw-advance">+100<span class="pw-wide"> passos</span></button>
+      <label class="pw-speed"><span class="pw-sr">Velocidade</span><select id="pw-speed"><option value="1">1×</option><option value="4">4×</option><option value="12">12×</option></select></label>
+    </div>
+  </header>
+  <main class="pw-laboratory">
+    <section class="pw-field" aria-labelledby="pw-title">
+      <div class="pw-field-head"><div><h2 id="pw-title">Laboratório da matéria</h2><div class="pw-field-context"><span id="pw-profile"></span><span>Química exploratória de H, C, N, O, P e S</span><button type="button" id="pw-new-profile" title="Abre outra execução no passo zero com a semente, o inventário inicial, a temperatura e o volume iniciais e os controles em foco." hidden>Nova execução v3 com esta semente</button></div></div>
+        <button type="button" id="pw-fullscreen" aria-label="Alternar tela cheia" title="Tela cheia">⛶</button></div>
+      <div class="pw-stage">
+        <canvas id="pw-map" tabindex="0" aria-label="Campo de átomos. Clique para inspecionar. Com ampliação, arraste ou use as setas para deslocar o campo. Use o inspetor para selecionar por identificador."></canvas>
+        <div class="pw-optics" aria-label="Ampliação óptica"><button id="pw-zoom-out" type="button" aria-label="Reduzir ampliação">−</button><output id="pw-zoom">1×</output><button id="pw-zoom-in" type="button" aria-label="Aumentar ampliação">+</button></div>
+        <div class="pw-projection">Projeção XY · densidade projetada</div><div id="pw-scale-bar" class="pw-scale-bar"><i></i><span></span></div>
+      </div>
+      <div class="pw-legend" aria-label="Cores convencionais para identificar os elementos">
+        <span><i class="pw-swatch h"></i><b>H</b> hidrogênio</span><span><i class="pw-swatch c"></i><b>C</b> carbono</span><span><i class="pw-swatch n"></i><b>N</b> nitrogênio</span><span><i class="pw-swatch o"></i><b>O</b> oxigênio</span><span><i class="pw-swatch p"></i><b>P</b> fósforo</span><span><i class="pw-swatch s"></i><b>S</b> enxofre</span>
+      </div>
+    </section>
+    <aside class="pw-side" id="pw-side" aria-label="Instrumentos do microscópio">
+      <div class="pw-side-head"><div role="tablist" aria-label="Instrumentos" class="pw-tabs">
+        <button id="pw-tab-inspect" role="tab" aria-selected="true" aria-controls="pw-panel-inspect" type="button" data-tab="inspect">Inspeção</button>
+        <button id="pw-tab-environment" role="tab" aria-selected="false" aria-controls="pw-panel-environment" type="button" data-tab="environment" tabindex="-1">Ambiente</button>
+        <button id="pw-tab-bench" role="tab" aria-selected="false" aria-controls="pw-panel-bench" type="button" data-tab="bench" tabindex="-1">Bancada</button>
+        <button id="pw-tab-evidence" role="tab" aria-selected="false" aria-controls="pw-panel-evidence" type="button" data-tab="evidence" tabindex="-1">Evidências</button>
+      </div><button type="button" id="pw-collapse" aria-label="Recolher instrumentos" aria-expanded="true">⌄</button></div>
+      <div class="pw-side-body">
+        <section id="pw-panel-inspect" role="tabpanel" aria-labelledby="pw-tab-inspect">
+          <div class="pw-panel-block"><h2>Inspecionar matéria</h2><p>Selecione um átomo, uma ligação ou uma molécula no campo.</p>
+            <div class="pw-selectors"><label>Escala<select id="pw-scale"><option value="particle">Átomo</option><option value="bond">Ligação</option><option value="cluster">Molécula</option></select></label><label>Identificador<select id="pw-choices"></select></label></div>
+          </div>
+          <div class="pw-panel-block"><nav id="pw-breadcrumb" aria-label="Caminho da seleção"></nav><canvas id="pw-atom" hidden width="270" height="125" role="img" aria-label="Esquema da constituição do átomo selecionado"></canvas><div id="pw-inspect"></div><div id="pw-members"></div></div>
+        </section>
+        <section id="pw-panel-environment" role="tabpanel" aria-labelledby="pw-tab-environment" hidden>
+          <div class="pw-panel-block"><h2>Condições do recipiente</h2><p>Controle a temperatura-alvo e o volume do mesmo campo.</p>
+            <form id="pw-environment-form" class="pw-environment-form"><label>Temperatura-alvo (K)<input type="number" id="pw-temperature" min="1" max="3000" step="any" required></label><label>Volume (nm³)<input type="number" id="pw-volume" min="1" max="512" step="any" required></label><label class="pw-check"><input id="pw-binding" type="checkbox" checked> Permitir formação de ligações</label><button type="submit" id="pw-apply">Aplicar condições</button></form>
+            <dl class="pw-data" id="pw-energy"></dl><p id="pw-phase-reason"></p></div>
+          <div class="pw-panel-block"><details><summary>Novo mundo e ramos</summary><form id="pw-new"><label>Semente <input id="pw-seed" type="number" min="0" max="4294967295" step="1" value="42" required></label><button type="submit">Iniciar nova execução v3</button></form><div id="particle-session"></div></details></div>
+          <div class="pw-panel-block"><details><summary>Referências físicas e químicas</summary><ul id="pw-sources"></ul></details></div><div class="pw-panel-block"><details><summary>Arquivos e revisões</summary><section id="world-archive" aria-label="Arquivo do mundo atômico"></section><a href="./recovery.html">Recuperar arquivo anterior</a></details></div>
+        </section>
+        <section id="pw-panel-bench" role="tabpanel" aria-labelledby="pw-tab-bench" hidden><div id="molecular-bench"></div></section>
+        <section id="pw-panel-evidence" role="tabpanel" aria-labelledby="pw-tab-evidence" hidden>
+          <div class="pw-panel-block"><h2>Evidências do campo</h2><p id="pw-evidence-summary"></p><dl class="pw-data" id="pw-evidence"></dl><p>O ciclo é um anel de ligações. Membranas, compartimentação, metabolismo, reprodução e vida permanecem sem demonstração neste modelo.</p></div>
+          <div class="pw-panel-block"><h3>Últimos eventos</h3><ol id="pw-events"></ol></div>
+        </section>
+      </div>
+    </aside>
+  </main>
+  <footer class="pw-foot"><dl aria-label="Inventário atual"><div><dt>Átomos</dt><dd id="pw-count">—</dd></div><div><dt>Livres</dt><dd id="pw-free">—</dd></div><div><dt>Ligações</dt><dd id="pw-bonds">—</dd></div><div><dt>Moléculas</dt><dd id="pw-clusters">—</dd></div></dl><span id="pw-feedback" role="status"></span></footer>
+  <noscript>Ative o JavaScript para observar os átomos e avançar a simulação.</noscript>
+  <script type="module" src="./src/particle-app.js"></script>
+</body>
+</html>

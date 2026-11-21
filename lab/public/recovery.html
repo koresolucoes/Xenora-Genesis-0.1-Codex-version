@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recuperar registro · Xenora</title><link rel="stylesheet" href="./particles.css"></head>
+<body class="p-recovery"><main><a href="./">Voltar ao mundo de partículas</a><h1>Recuperar registro anterior</h1>
+<p>As versões anteriores usavam modelos de lagoa e populações com fundadores introduzidos. Seus arquivos conservam as regras e os dados da versão que os criou.</p>
+<label>Abrir arquivo salvo<input id="recovery-file" type="file" accept=".json,application/json"></label>
+<details><summary>Recuperar uma revisão do Supabase</summary><form id="recovery-form"><label>Chave de recuperação<input type="password" id="recovery-key" autocomplete="off" required></label><button>Consultar registros</button></form>
+<label>Execução<select id="recovery-runs"></select></label><label>Revisão<select id="recovery-revisions"></select></label><button type="button" id="recovery-load">Ler revisão</button></details>
+<p id="recovery-status" role="status"></p><section id="recovery-result" hidden><h2>Registro recuperado</h2><dl id="recovery-info"></dl><button id="recovery-download" type="button">Baixar JSON original</button></section>
+</main><script type="module" src="./src/particle-recovery.js"></script></body></html>

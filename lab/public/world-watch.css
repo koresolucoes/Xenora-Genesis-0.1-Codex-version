@@ -1,0 +1,48 @@
+.ww-panel{min-width:0;padding:clamp(1rem,2.2vw,1.65rem);border:1px solid #344540;border-radius:14px;background:linear-gradient(145deg,#14211e,#111b19);color:#e4e9de}
+.ww-panel [hidden]{display:none!important}
+.ww-header,.ww-controls,.ww-title,.ww-bottom{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap}
+.ww-header h2,.ww-title h3{margin:0;font:inherit;font-size:1.32rem;font-weight:650;line-height:1.2}
+.ww-title h3{font-size:1.04rem;overflow-wrap:anywhere}
+.ww-header p,.ww-empty,.ww-trace,.ww-origin,.ww-bottom p{color:#b2c2b8;line-height:1.45;font-size:.9rem;margin:.4rem 0}
+.ww-count,.ww-state{font-size:.79rem;color:#c9d4cb;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ww-count{padding:.34rem .66rem;border:1px solid #43554c;border-radius:1rem}
+.ww-setup{margin:1rem 0 .75rem;display:flex;gap:.65rem;align-items:flex-end;flex-wrap:wrap}
+.ww-setup label,.ww-light{display:grid;gap:.27rem;color:#cbd5cc;font-size:.85rem}
+.ww-setup input,.ww-light select{font:inherit;font-size:.9rem;color:#e5ebdf;background:#101a17;border:1px solid #415348;border-radius:6px;min-height:2.35rem;padding:.32rem .55rem;max-width:100%}
+.ww-setup input[type=number]{width:7.5rem}
+.ww-actions{display:flex;gap:.36rem;align-items:center;flex-wrap:wrap}
+.ww-btn{padding:.40rem .65rem;min-height:2.1rem;background:#1a2923;color:#dce9d9;border:1px solid #3c5145;border-radius:6px;font:inherit;font-size:.85rem;line-height:1.2;cursor:pointer}
+.ww-btn:hover:not(:disabled),.ww-btn:focus-visible,.ww-light select:focus-visible,.ww-setup input:focus-visible{border-color:#a3c98d;outline:1px solid #a3c98d;outline-offset:1px}
+.ww-primary{color:#142418;background:#b2d195;border-color:#b2d195;font-weight:650}
+.ww-btn:disabled{opacity:.47;cursor:default}
+.ww-controls{padding:.65rem 0 .9rem;border-bottom:1px solid #33433a}
+.ww-save{color:#a6b9a7;font-size:.79rem}
+.ww-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;margin-top:.8rem}
+.ww-card{min-width:0;padding:.9rem;border:1px solid #384c41;border-radius:9px;background:#14221b}
+.ww-card.ww-focused{border-color:#9aba86}
+.ww-state{display:inline-flex;align-items:center;gap:.34rem}
+.ww-state::before{content:"";width:.45rem;height:.45rem;border-radius:50%;background:#87958c}
+.ww-state.ww-running::before{background:#b7dc81}
+.ww-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.62rem .75rem;margin:.75rem 0}
+.ww-stats dt{color:#b2c0b4;font-size:.79rem}.ww-stats dd{margin:.12rem 0 0;color:#e7eedd;font-variant-numeric:tabular-nums;font-size:1rem;font-weight:550}
+.ww-light{display:flex;align-items:center;justify-content:space-between;padding:.38rem 0 .62rem}
+.ww-light select{min-width:5rem;min-height:2rem}.ww-trace,.ww-origin{font-size:.8rem}
+.ww-bottom{justify-content:flex-start;margin-top:.42rem}
+.ww-tree{list-style:none;padding:0;margin:.9rem 0;display:grid;gap:.28rem}
+.ww-node{position:relative;margin-inline-start:calc(var(--ww-level,0)*clamp(.5rem,2.2vw,1.25rem));border-left:2px solid #657e71;padding:.4rem .65rem}
+.ww-node[data-ww-parent]::before{content:"";position:absolute;left:-.48rem;top:1.05rem;width:.43rem;height:1px;background:#657e71}
+.ww-node[aria-current=true]{background:#23392f;border-color:#b5d99c;border-radius:0 5px 5px 0}
+.ww-node-title{display:flex;align-items:center;gap:.35rem .6rem;flex-wrap:wrap}
+.ww-node-link,.ww-node-name{overflow-wrap:anywhere;font-size:.94rem;font-weight:650}
+.ww-node-link{padding:.17rem .4rem;min-height:1.85rem;color:#c1e4b2;text-decoration:underline;text-underline-offset:.18em}
+.ww-node-role,.ww-node-description,.ww-focus-label{font-size:.78rem;line-height:1.4}
+.ww-node-description{display:block;margin-top:.15rem;color:#bdcbbf;overflow-wrap:anywhere}
+.ww-focus-label{font-weight:650;color:#d0efb9}.ww-node-role{color:#b0bfb7}
+@media(max-width:700px){.ww-grid{grid-template-columns:1fr}.ww-header{align-items:flex-start}.ww-setup input[type=text]{width:100%}}
+.ww-panel{container-type:inline-size}
+@container (max-width:30rem){
+  .ww-setup{align-items:stretch}.ww-setup label{min-width:0}.ww-controls{align-items:flex-start}
+  .ww-card{padding:.64rem}.ww-stats{grid-template-columns:minmax(0,1fr);gap:.36rem}
+  .ww-light{align-items:flex-start;flex-direction:column;gap:.22rem}.ww-actions{align-items:stretch}
+  .ww-title{gap:.35rem}.ww-card .ww-btn{padding:.35rem .45rem}
+}

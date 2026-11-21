@@ -1,0 +1,19 @@
+{
+  "name": "xenora-lagoon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run",
+    "test": "node --test test/*.test.js",
+    "build:sites": "node scripts/build-sites.mjs"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "wrangler": "4.165.0"
+  }
+}

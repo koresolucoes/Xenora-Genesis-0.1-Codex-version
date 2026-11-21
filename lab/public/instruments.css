@@ -1,0 +1,16 @@
+.world-instrument {
+  width:min(1140px,95vw); height:min(840px,92dvh); max-height:96dvh;
+  border:1px solid #678278; border-radius:10px; padding:0; margin:auto; color:#ebf1e5;
+  background:#14231f; box-shadow:0 16px 80px #07150f90;
+}
+.world-instrument[open] { display:flex; flex-direction:column; }
+.world-instrument::backdrop { background:#061511b8; }
+.world-instrument header { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.75rem 1rem; border-bottom:1px solid #425d50; }
+.world-instrument header span { font:.78rem/1.3 var(--mono,monospace); color:#b5cfb6; }
+.world-instrument header h2 { margin:.2rem 0; font:1.4rem/1.1 var(--serif,Georgia); }
+.world-instrument header p { margin:0; font:.9rem/1.4 var(--sans,sans-serif); color:#cedacd; }
+.world-instrument header button { color:#edf3e8; border:1px solid #718a75; background:#253b2e; padding:.5rem .8rem; border-radius:.35rem; }
+.world-instrument iframe { border:0; width:100%; flex:1; min-height:0; background:#13221c; }
+.instrument-content .po-bar {display:none}
+.instrument-content .top .brand,.instrument-content .top .origin-nav-home,.instrument-content [hidden] {display:none !important}
+@media(max-width:700px){.world-instrument{width:100%;height:100dvh;max-width:100vw;max-height:100dvh;border-radius:0}.world-instrument header{padding:.65rem .75rem}}

@@ -1,0 +1,134 @@
+.science-dashboard {
+  --sd-bg: #122320;
+  --sd-muted: #afc1b3;
+  --sd-rule: #344b41;
+  width: 100%;
+  min-width: 0;
+  margin: 29px 0 40px;
+  color: var(--ink);
+}
+.sd-heading, .sd-plot-head, .sd-controls {display: flex; align-items: center; gap: 12px}
+.sd-heading, .sd-plot-head {justify-content: space-between}
+.sd-heading {margin: 0 0 15px}
+.sd-heading h2 {font: 400 clamp(31px,3vw,47px)/1.12 var(--serif); letter-spacing: -.045em}
+.sd-export {white-space: nowrap}
+.sd-cards {display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin: 0 0 12px}
+.sd-cards > div, .sd-plot-card {min-width: 0; border: 1px solid var(--sd-rule); border-radius: 9px; background: var(--sd-bg)}
+.sd-cards > div {padding: 14px clamp(12px,1.45vw,23px) 12px}
+.sd-cards dt {font: 500 13px/1.35 var(--sans); color: #c3d1c1}
+.sd-cards dd {margin: 8px 0 5px; line-height: 1.1; color: #e8eddc}
+.sd-cards strong {font: 400 clamp(22px,2vw,32px)/1.14 var(--mono); letter-spacing: -.06em; overflow-wrap: anywhere}
+.sd-cards small, .sd-axis-caption, .sd-time-caption, .sd-period {font: 400 11px/1.5 var(--mono); color: var(--sd-muted)}
+.sd-cards p {font: 400 12px/1.4 var(--sans); color: var(--sd-muted); margin: 0}
+.sd-plot-card {padding: clamp(13px,1.8vw,26px)}
+.sd-plot-head {align-items: flex-start; flex-wrap: wrap}
+.sd-plot-head h3 {font: 400 clamp(23px,2.3vw,33px)/1.2 var(--serif); letter-spacing: -.035em; margin: 0}
+.sd-controls {flex-wrap: wrap; align-items: flex-end}
+.sd-controls label {display: flex; align-items: center; gap: 6px; font: 400 12px/1.3 var(--sans); color: var(--sd-muted)}
+.sd-controls select {max-width: 100%; min-height: 32px; border: 1px solid #41594b; border-radius: 5px; background: #182c25; color: #e3ead9; padding: 4px 5px; font: 500 13px/1.3 var(--sans)}
+.sd-controls select:focus-visible, .sd-legend:focus-visible {outline: 2px solid var(--mint); outline-offset: 3px}
+.sd-chart-layout {display: grid; grid-template-columns: minmax(0,1fr) clamp(195px,24%,295px); align-items: center; gap: clamp(14px,2.5vw,38px); margin: 16px 0 12px}
+.sd-graph {min-width: 0}
+.sd-axis-caption {margin-bottom: 2px; text-transform: none}
+.sd-plot {display: block; width: 100%; height: 160px; overflow: visible}
+.sd-grid line {stroke: #3a5046; stroke-width: 1; stroke-dasharray: 3 4}
+.sd-grid text {fill: #a8baad; font: 10px var(--mono)}
+.sd-time-caption {text-align: center}
+.sd-series {display: flex; flex-direction: column; gap: 2px}
+.sd-legend {display: grid; grid-template-columns: 24px minmax(0,1fr) auto; align-items: center; gap: 9px; text-align: left; width: 100%; padding: 7px 6px; color: #e1eada; border-radius: 4px}
+.sd-legend:not(:disabled):hover {background: #1d332a}
+.sd-legend:disabled {opacity: 1; cursor: default}
+.sd-legend[aria-pressed="false"] {opacity: .63}
+.sd-legend[aria-pressed="false"] .sd-series-name {text-decoration: line-through}
+.sd-line-key {display: flex}
+.sd-legend .sd-line-key svg {width: 24px; height: 8px}
+.sd-series-name {font: 400 13px/1.35 var(--sans)}
+.sd-legend strong {font: 500 12px/1.35 var(--mono); color: #eaf1dd; overflow-wrap: anywhere}
+.sd-description {border-top: 1px solid #30463d; padding-top: 10px; color: #cfddcc; font: 400 13px/1.5 var(--sans)}
+.sd-period {margin: 5px 0 0}
+@media(max-width: 780px) {
+  .sd-cards {grid-template-columns: repeat(2,minmax(0,1fr))}
+  .sd-chart-layout {grid-template-columns: minmax(0,1fr)}
+  .sd-series {display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 2px 9px}
+}
+@media(max-width: 500px) {
+  .science-dashboard {margin-top: 24px}
+  .sd-heading {gap: 8px}
+  .sd-heading h2 {font-size: 30px}
+  .sd-export {font-size: 12px; padding-inline: 8px; gap: 4px}
+  .sd-cards {gap: 6px}
+  .sd-cards > div {padding: 11px}
+  .sd-plot-head {display: block}
+  .sd-controls {margin-top: 12px; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr); gap: 8px}
+  .sd-controls label {display: grid; gap: 4px}
+  .sd-series {grid-template-columns: 1fr}
+  .sd-chart-layout {gap: 7px}
+  .sd-legend {padding-block: 5px}
+}
+.sd-trial {padding: clamp(13px,1.8vw,26px); border: 1px solid var(--sd-rule); background: var(--sd-bg); border-radius: 9px; margin-top: 12px}
+.sd-trial-head {display: flex; justify-content: space-between; align-items: center; gap: 18px}
+.sd-trial-head h3 {font: 400 clamp(23px,2.3vw,33px)/1.2 var(--serif); letter-spacing: -.035em; margin: 0}
+.sd-trial-head p {color: #c2d0c3; font: 400 13px/1.5 var(--sans); margin-top: 5px; max-width: 69ch}
+.sd-trial-head button {flex-shrink: 0}
+.sd-trial-status {color: #c8dbb9; font: 400 12px/1.5 var(--mono); margin-top: 13px}
+.sd-trial-status:empty {display: none}
+.sd-trial-results {display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; border-top: 1px solid var(--sd-rule); padding-top: 10px; margin-top: 9px}
+.sd-trial-results dt {color: var(--sd-muted); font-size: 12px}
+.sd-trial-results dd {margin: 3px 0 0; color: var(--ink); font: 500 15px/1.4 var(--mono)}
+@media(max-width: 650px) {
+  .sd-trial-head {align-items: flex-start; flex-direction: column; gap: 10px}
+  .sd-trial-results {grid-template-columns: 1fr; gap: 6px}
+  .sd-trial-results > div {display: flex; justify-content: space-between; align-items: baseline; gap: 6px}
+}
+
+/* Cellular stocks use the colors of the anatomy shown by the microscope. */
+.examine-cell {margin-inline-start:auto; border:1px solid #62795c; border-radius:5px; padding:5px 10px; color:#d6ebc2; font:600 12px/1.4 var(--sans)}
+.examine-cell:hover {background:#273c2d}
+.cell-compartments {min-width:0; margin:0 0 9px}
+.cell-composition-head, .cell-metabolism dl>div {display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+.cell-composition-head h3 {font:500 13px/1.35 var(--sans); color:#d6e5d5}
+.cell-composition-head b, .cell-stocks dd, .cell-metabolism dd {margin:0; font:500 12px/1.45 var(--mono); color:#eff3dc}
+.cell-composition-head b {white-space:nowrap}
+.cell-stack {display:flex; overflow:hidden; height:8px; border-radius:3px; background:#25372f; margin:7px 0}
+.cell-compartments [data-stock="membrane"] {--stock:#dbf0c7}
+.cell-compartments [data-stock="pigment"] {--stock:#a6d94d}
+.cell-compartments [data-stock="transporters"] {--stock:#67cfca}
+.cell-compartments [data-stock="reserve"] {--stock:#daa447}
+.cell-stack i {display:block; height:100%; background:var(--stock)}
+.cell-stocks {display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin:8px 0 10px}
+.cell-stocks>div {border-inline-start:2px solid var(--stock); padding-inline-start:6px}
+.cell-stocks dt, .cell-metabolism dt {color:#bccec0; font:400 12px/1.4 var(--sans)}
+.cell-metabolism {border-block:1px solid #3b5044; padding:4px 0}
+.cell-metabolism summary {cursor:pointer; padding:4px 0; font:600 13px/1.4 var(--sans); color:#d8ebc8}
+.cell-metabolism summary:focus-visible {outline:2px solid var(--mint); outline-offset:2px}
+.cell-metabolism dl>div {padding:3px 0}
+.cell-metabolism dd {text-align:end}
+.cell-metabolism p {font:400 12px/1.45 var(--sans); color:#becdbf; margin:6px 0}
+.cell-gene {margin:5px 0 7px; padding:8px; border:1px solid #365042; border-radius:4px; background:#10221d}
+.cell-gene h4 {font:600 12px/1.4 var(--sans); color:#d7e5cd}
+.cell-sequence {display:block; margin:4px 0; color:#e6efd4; font:500 13px/1.5 var(--mono); letter-spacing:.05em; overflow-wrap:anywhere}
+.cell-sequence mark {padding:0; color:#10221d; background:#e7bf70; font-weight:700}
+.cell-gene .cell-change {color:#e9cc8e}
+.cell-relatives {display:flex; flex-wrap:wrap; gap:5px; margin-block:7px}
+.cell-relatives button, .sd-cell-history {color:#d5eac3; border-bottom:1px solid #759466; padding:3px 0; font:600 12px/1.35 var(--sans); text-align:left}
+.cell-relatives button+button {margin-inline-start:7px}
+.sd-molecules {margin-top:12px; padding:clamp(14px,1.8vw,24px); border:1px solid var(--sd-rule); border-radius:9px; background:var(--sd-bg)}
+.sd-molecules header {display:flex; align-items:baseline; justify-content:space-between; gap:12px}
+.sd-molecules h3 {font:400 clamp(23px,2.3vw,33px)/1.2 var(--serif); letter-spacing:-.035em}
+.sd-molecules header span {color:var(--sd-muted); white-space:nowrap; font:400 12px/1.4 var(--mono)}
+.sd-molecules dl {display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin:13px 0 8px; gap:10px}
+.sd-molecules dl>div {padding-inline-start:9px; border-inline-start:2px solid #607d65}
+.sd-molecules dt {font:500 13px/1.4 var(--sans); color:#bccfc2}
+.sd-molecules dd {margin:4px 0 0; font:500 clamp(16px,1.7vw,24px)/1.25 var(--mono); color:#e3ecd3}
+.sd-molecules dd small {font:400 11px/1.4 var(--mono); color:var(--sd-muted)}
+@media(max-width:690px){
+  .cell-compartments {grid-column:1/-1; grid-row:4; margin:6px 0}
+  .specimen #inspector-rows {grid-column:2; grid-row:3}
+  .sd-molecules dl {grid-template-columns:1fr; gap:6px}
+  .sd-molecules dl>div {display:flex; justify-content:space-between; align-items:baseline; gap:4px}
+  .sd-molecules h3 {font-size:23px}
+  .sd-molecules dd {text-align:right; white-space:nowrap}
+}
+@media(max-width:420px){
+  .examine-cell {margin-inline-start:0}
+}

@@ -1,0 +1,23 @@
+.molecular-trial {margin-top: 12px; padding: clamp(13px,1.8vw,26px); border: 1px solid var(--sd-rule,#344b41); border-radius: 9px; background: var(--sd-bg,#122320)}
+.mt-head {display: flex; justify-content: space-between; align-items: center; gap: 16px}
+.mt-head h3 {font: 400 clamp(23px,2.3vw,33px)/1.2 var(--serif); letter-spacing: -.035em; margin: 0}
+.mt-head p, .mt-method p, .mt-note {max-width: 76ch; color: #c2d0c3; font: 400 13px/1.5 var(--sans); margin: 6px 0 0}
+.mt-actions {display: flex; flex-wrap: wrap; gap: 7px; align-items: center; flex-shrink: 0}
+.molecular-trial details {margin-top: 12px}
+.molecular-trial summary {color: #cddfca; width: fit-content; cursor: pointer; font: 500 13px/1.5 var(--sans)}
+.molecular-trial summary:focus-visible {outline: 2px solid var(--mint); outline-offset: 3px}
+.mt-status {color: #c8dbb9; font: 400 12px/1.5 var(--mono); margin-top: 12px}
+.mt-status:empty {display: none}
+.mt-scroll {overflow-x: auto; margin-top: 12px}
+.molecular-trial table {border-collapse: collapse; width: 100%; color: var(--ink)}
+.molecular-trial caption {font: 500 14px/1.45 var(--sans); text-align: left; padding-bottom: 8px}
+.molecular-trial th, .molecular-trial td {text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--sd-rule,#344b41); font: 400 12px/1.4 var(--mono)}
+.molecular-trial th:first-child {text-align: left; padding-left: 0}
+.molecular-trial td {white-space: nowrap}
+.molecular-trial thead th {color: #bed2c1; font: 500 12px/1.4 var(--sans); vertical-align: bottom}
+.molecular-trial [data-molecular-summary] td:nth-child(2) {color: #a6dcd9}
+.molecular-trial [data-molecular-summary] td:nth-child(3) {color: #c4dfad}
+@media(max-width: 700px) {
+  .mt-head {align-items: flex-start; flex-direction: column; gap: 10px}
+  .molecular-trial th, .molecular-trial td {padding-inline: 6px}
+}

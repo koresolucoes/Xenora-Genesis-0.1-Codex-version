@@ -2,6 +2,10 @@
 
 Experimental extraterrestrial prebiotic reaction–diffusion simulator in Rust. **This is not a validated abiogenesis model.**
 
+## Laboratório interativo
+
+O [Observatório Xenora](lab/README.md) abre um mundo de partículas dispersas. Reações locais e ligações conservam a identidade material, e o observador acompanha estruturas formadas nesse mesmo substrato. Para abrir no navegador, sirva `lab/public` e acesse `http://localhost:8000`. O laboratório usa JavaScript e tem um arquivo científico próprio. O experimento Rust descrito abaixo é uma implementação anterior.
+
 ## Local execution
 
 ```bash
